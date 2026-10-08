@@ -95,7 +95,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * bottom, so 140dp leaves the overlay 12px clear of it while the bar is up. With
      * the bar away the overlay drops to 24dp, which is where subtitles belong.
      */
-    private static final int SUBTITLE_MARGIN_IDLE_DP = 24;
+    private static final int SUBTITLE_MARGIN_IDLE_DP = 12;
     private static final int SUBTITLE_MARGIN_CHROME_DP = 140;
 
     /** Subtitle text size. 26sp is 85% of the 30sp this started at. */
