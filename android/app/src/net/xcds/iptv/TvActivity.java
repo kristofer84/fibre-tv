@@ -67,6 +67,17 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      */
     private static final int TRACK_TYPE_AUDIO = 0;
 
+    /**
+     * libvlc_meta_Title is 0. Written as a literal rather than Media.Meta.Title
+     * because I have not been able to dump that nested class, and guessing at an
+     * API cost a build earlier in this project. logMediaMetas prints every id so
+     * the device says where the service name lands instead.
+     */
+    private static final int META_TITLE = 0;
+
+    /** Highest meta id worth probing when logging; libvlc defines about 17. */
+    private static final int META_MAX = 20;
+
     private LibVLC libVLC;
     private MediaPlayer player;
     private IVLCVout vout;
@@ -83,6 +94,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
     private final List<Channels.Channel> channels = new ArrayList<>();
     private final List<Button> buttons = new ArrayList<>();
+
+    /**
+     * Service names taken from each stream's own SDT, by channel index, once seen.
+     * Empty until a channel has been tuned at least once. The m3u name is the
+     * fallback, so the bar shows something immediately and improves when the
+     * stream names itself.
+     */
+    private String[] sdtNames;
+
     private int current = -1;
 
     /**
@@ -133,6 +153,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return;
         }
         buildChannelBar();
+        sdtNames = new String[channels.size()];
 
         ArrayList<String> options = new ArrayList<>();
         options.add("--network-caching=800");
@@ -359,7 +380,16 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private void updateBar() {
         for (int i = 0; i < buttons.size(); i++) {
             buttons.get(i).setSelected(i == current);
+            buttons.get(i).setText((i + 1) + ".  " + nameOf(i));
         }
+    }
+
+    /** What the stream calls itself once known, otherwise what the playlist calls it. */
+    private String nameOf(int index) {
+        if (sdtNames != null && index >= 0 && index < sdtNames.length && sdtNames[index] != null) {
+            return sdtNames[index];
+        }
+        return index >= 0 && index < channels.size() ? channels.get(index).name : "?";
     }
 
     private void showChrome() {
@@ -437,7 +467,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         if (current < 0 || current >= channels.size()) {
             return "the operator TV";
         }
-        return (current + 1) + "   " + channels.get(current).name;
+        return (current + 1) + "   " + nameOf(current);
     }
 
     private void onPlayerEvent(MediaPlayer.Event event) {
@@ -514,6 +544,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             // Only worth printing there: the table is incomplete during the ES burst
             // and identical afterwards, so logging it per ES event just floods.
             logMediaTracks(when);
+            logMediaMetas();
+            readServiceName();
         }    }
 
     /** The selectable audio tracks: libVLC always offers "Disable" as id -1 first. */
@@ -749,6 +781,53 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return "fin";
         }
         return language;
+    }
+
+    /**
+     * The name the stream gives itself. ffmpeg surfaces the same SDT descriptor as
+     * TAG:service_name, and VLC's TS demuxer sets the media title from it, so it
+     * should arrive as meta id 0 - but that is an expectation, not a measurement,
+     * so logMediaMetas prints every id and this only uses one that is non-empty.
+     */
+    private void readServiceName() {
+        IMedia media = player == null ? null : player.getMedia();
+        if (media == null || sdtNames == null || current < 0 || current >= sdtNames.length) {
+            return;
+        }
+        String title = safeMeta(media, META_TITLE);
+        if (title == null) {
+            return;
+        }
+        title = title.trim();
+        if (title.isEmpty() || title.equals(sdtNames[current])) {
+            return;
+        }
+        sdtNames[current] = title;
+        Log.i(TAG, "channel " + (current + 1) + " names itself '" + title + "'");
+        updateBar();
+        showCard(title());
+    }
+
+    private void logMediaMetas() {
+        IMedia media = player == null ? null : player.getMedia();
+        if (media == null) {
+            return;
+        }
+        for (int i = 0; i <= META_MAX; i++) {
+            String value = safeMeta(media, i);
+            if (value != null && !value.trim().isEmpty()) {
+                Log.i(TAG, "meta " + i + " = '" + value + "'");
+            }
+        }
+    }
+
+    /** getMeta is a JNI call; an out-of-range id is not worth a crash. */
+    private static String safeMeta(IMedia media, int id) {
+        try {
+            return media.getMeta(id);
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private static String describe(MediaPlayer.TrackDescription[] tracks) {
