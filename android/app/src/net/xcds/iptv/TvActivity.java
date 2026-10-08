@@ -39,8 +39,7 @@ import java.util.List;
  *   - a WifiManager.MulticastLock, without which the WiFi stack drops the group
  *     (libVLC does not take one for you);
  *   - playback is stopped in onStop, so leaving the app actually leaves the group
- *     instead of pulling 12-18 Mbit/s forever (see the flood monitor in the
- *     home-config repo).
+ *     instead of pulling 12-18 Mbit/s forever while nobody is watching.
  */
 public class TvActivity extends Activity implements IVLCVout.Callback {
 

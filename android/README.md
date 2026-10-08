@@ -37,8 +37,7 @@ never gets any packets":
   libVLC does not take one for you — VLC for Android takes it in its own UI code,
   which is not part of `libvlc-all`.
 - **Playback is stopped in `onStop`.** Leaving the app actually leaves the group,
-  rather than pulling 12–18 Mbit/s forever. `iptv-flood-monitor.service` in the
-  home-config repo is watching for exactly that.
+  rather than pulling 12–18 Mbit/s forever with nobody watching.
 
 ### Building
 
@@ -50,7 +49,7 @@ never gets any packets":
 Everything compiles **inside a container** (`Dockerfile`); the host is only used
 to `curl` the pinned toolchain into `toolchain/` and to run `docker`. That is
 deliberate, because Android's build tools are mostly x86-64 binaries and this
-builds on an arm64 Pi:
+builds on an arm64 host:
 
 | need | how it is met |
 |---|---|
