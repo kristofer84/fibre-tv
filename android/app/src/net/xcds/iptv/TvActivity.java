@@ -24,6 +24,7 @@ import android.widget.TextView;
 import org.videolan.libvlc.LibVLC;
 import org.videolan.libvlc.Media;
 import org.videolan.libvlc.MediaPlayer;
+import org.videolan.libvlc.interfaces.IMedia;
 import org.videolan.libvlc.interfaces.IVLCVout;
 
 import java.util.ArrayList;
@@ -35,12 +36,18 @@ import java.util.List;
  * the same rtp://@group:port URLs that VLC uses on a desktop, which is what makes
  * the AC3 and MP2 audio work.
  *
- * The two things that make it behave on Android rather than just on a desktop:
+ * The streams carry two audio tracks (MPEG-1 Layer II and AC-3, both Swedish) and
+ * three teletext subtitle pages, so both are selectable from the channel bar.
+ *
+ * The things that make it behave on Android rather than just on a desktop:
  *
  *   - a WifiManager.MulticastLock, without which the WiFi stack drops the group
  *     (libVLC does not take one for you);
  *   - playback is stopped in onStop, so leaving the app actually leaves the group
- *     instead of pulling 12-18 Mbit/s forever while nobody is watching.
+ *     instead of pulling 12-18 Mbit/s forever while nobody is watching;
+ *   - attachViews/detachViews are made idempotent, because the system can call
+ *     onStart on a vout that is already attached right after an in-place update,
+ *     and libVLC throws IllegalStateException for that.
  */
 public class TvActivity extends Activity implements IVLCVout.Callback {
 
@@ -59,10 +66,23 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private TextView card;
     private HorizontalScrollView barScroll;
     private LinearLayout bar;
+    private LinearLayout controls;
+    private HorizontalScrollView controlsScroll;
+    private Button audioButton;
+    private Button subsButton;
 
     private final List<Channels.Channel> channels = new ArrayList<>();
     private final List<Button> buttons = new ArrayList<>();
     private int current = -1;
+
+    /**
+     * Track choice, remembered across channel changes. Both are ordinals rather
+     * than track ids, because the ids are per-stream (they are transport PIDs) but
+     * the ordering is the same on every channel here.
+     */
+    private int audioWanted;
+    private int spuWanted;
+    private boolean applyWanted;
 
     private WifiManager.MulticastLock multicastLock;
     private WifiManager.WifiLock wifiLock;
@@ -84,7 +104,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         idleHide = new Runnable() {
             @Override
             public void run() {
-                if (barScroll.hasFocus() || bar.hasFocus()) {
+                if (barScroll.hasFocus() || bar.hasFocus()
+                        || controlsScroll.hasFocus() || controls.hasFocus()) {
                     return;                 // in use; hiding it would kill the D-pad
                 }
                 hideChrome();
@@ -136,7 +157,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         if (vout == null) {
             return;                     // channel list failed to load; nothing to play
         }
-        vout.attachViews();
+        // Re-set the view and only attach if not already attached. Without the
+        // guard, an in-place apk update makes the next launch die in onStart with
+        // "already attached or video view not configured" from AWindow.
+        vout.setVideoView(surface);
+        if (!vout.areViewsAttached()) {
+            vout.attachViews();
+        } else {
+            Log.i(TAG, "onStart: views were already attached");
+        }
         tune(current);
     }
 
@@ -148,7 +177,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         }
         // Stop rather than pause: this is what drops the multicast membership.
         player.stop();
-        vout.detachViews();
+        if (vout.areViewsAttached()) {
+            vout.detachViews();
+        }
         releaseLocks();
     }
 
@@ -194,25 +225,81 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         cardParams.setMargins(dp(32), dp(32), 0, 0);
         root.addView(card, cardParams);
 
+        // Two rows at the bottom: the track controls, then the channels. Keeping
+        // them in separate rows means the D-pad can move between them and a long
+        // channel name cannot scroll the controls out of reach.
+        LinearLayout bottom = new LinearLayout(this);
+        bottom.setOrientation(LinearLayout.VERTICAL);
+        bottom.setBackgroundColor(0x80000000);
+
+        controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        audioButton = new Button(this);
+        audioButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                cycleAudio();
+            }
+        });
+        audioButton.setOnFocusChangeListener(focusWatcher);
+        subsButton = new Button(this);
+        subsButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                cycleSubs();
+            }
+        });
+        subsButton.setOnFocusChangeListener(focusWatcher);
+        controls.addView(audioButton, controlParams());
+        controls.addView(subsButton, controlParams());
+
+        controlsScroll = new HorizontalScrollView(this);
+        controlsScroll.setHorizontalScrollBarEnabled(false);
+        controlsScroll.addView(controls, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT));
+
         bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
-
         barScroll = new HorizontalScrollView(this);
         barScroll.setHorizontalScrollBarEnabled(false);
-        barScroll.setBackgroundColor(0x80000000);
         barScroll.addView(bar, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
 
-        FrameLayout.LayoutParams barParams = new FrameLayout.LayoutParams(
+        bottom.addView(controlsScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+        bottom.addView(barScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        FrameLayout.LayoutParams bottomParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT);
-        barParams.gravity = Gravity.BOTTOM;
-        barParams.setMargins(dp(32), 0, dp(32), dp(32));
-        root.addView(barScroll, barParams);
+        bottomParams.gravity = Gravity.BOTTOM;
+        bottomParams.setMargins(dp(32), 0, dp(32), dp(32));
+        root.addView(bottom, bottomParams);
 
         setContentView(root);
         surface.requestFocus();
+    }
+
+    private final View.OnFocusChangeListener focusWatcher = new View.OnFocusChangeListener() {
+        @Override
+        public void onFocusChange(View v, boolean hasFocus) {
+            if (hasFocus) {
+                restartIdleTimer();
+            }
+        }
+    };
+
+    private LinearLayout.LayoutParams controlParams() {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        p.setMargins(dp(6), dp(6), dp(6), dp(6));
+        return p;
     }
 
     private void buildChannelBar() {
@@ -228,19 +315,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                     tune(index);
                 }
             });
-            button.setOnFocusChangeListener(new View.OnFocusChangeListener() {
-                @Override
-                public void onFocusChange(View v, boolean hasFocus) {
-                    if (hasFocus) {
-                        restartIdleTimer();
-                    }
-                }
-            });
-            LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT);
-            p.setMargins(dp(6), dp(6), dp(6), dp(6));
-            bar.addView(button, p);
+            button.setOnFocusChangeListener(focusWatcher);
+            bar.addView(button, controlParams());
             buttons.add(button);
         }
     }
@@ -253,6 +329,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
     private void showChrome() {
         card.setVisibility(View.VISIBLE);
+        controlsScroll.setVisibility(View.VISIBLE);
         barScroll.setVisibility(View.VISIBLE);
         restartIdleTimer();
     }
@@ -268,6 +345,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
     private void hideChrome() {
         ui.removeCallbacks(idleHide);
+        controlsScroll.setVisibility(View.GONE);
         barScroll.setVisibility(View.GONE);
         card.setVisibility(View.GONE);
         surface.requestFocus();
@@ -301,6 +379,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
         showCard(title() + "\njoining " + channel.group() + ", please wait");
         updateBar();
+        applyWanted = true;
+        updateTrackButtons();
 
         Media media = new Media(libVLC, Uri.parse(channel.url));
         media.setHWDecoderEnabled(true, false);
@@ -324,14 +404,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             case MediaPlayer.Event.Playing:
                 showCard(title());
                 restartIdleTimer();
-                logTracks("playing");
-                break;
-            case MediaPlayer.Event.ESAdded:
-            case MediaPlayer.Event.ESSelected:
-            case MediaPlayer.Event.ESDeleted:
-                Log.i(TAG, "es event=" + event.type + " esType=" + event.getEsChangedType()
-                        + " esId=" + event.getEsChangedID());
-                logTracks("es");
+                onTracksAvailable("playing");
                 break;
             case MediaPlayer.Event.Opening:
                 showCard(title() + "\njoining, please wait");
@@ -349,26 +422,233 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             case MediaPlayer.Event.EndReached:
                 showCard(title() + "\nstream ended");
                 break;
+            case MediaPlayer.Event.ESAdded:
+            case MediaPlayer.Event.ESSelected:
+            case MediaPlayer.Event.ESDeleted:
+                onTracksAvailable("es");
+                break;
             default:
                 break;
         }
     }
 
-    // ------------------------------------------------------------------ tracks
+    // ---------------------------------------------------------------- the tracks
 
     /**
-     * Exploratory: what libVLC actually reports for this transport stream, so the
-     * audio and subtitle labels can be built from real names rather than guessed.
-     * MPEG-TS audio tracks carry no useful name in most builds, in which case they
-     * get labelled by codec instead.
+     * Called whenever the track lists may have changed. Applies a remembered
+     * choice once per tuning, then refreshes the two control buttons.
      */
-    private void logTracks(String when) {
-        Log.i(TAG, when + ": audio current=" + player.getAudioTrack()
-                + " of " + describe(player.getAudioTracks()));
-        Log.i(TAG, when + ": spu   current=" + player.getSpuTrack()
-                + " of " + describe(player.getSpuTracks()));
-        Log.i(TAG, when + ": video current=" + player.getVideoTrack()
-                + " of " + player.getVideoTracksCount() + " " + describe(player.getVideoTracks()));
+    private void onTracksAvailable(String when) {
+        List<MediaPlayer.TrackDescription> audio = audioTracks();
+        List<MediaPlayer.TrackDescription> spu = spuTracks();
+        if (audio.isEmpty() && spu.isEmpty()) {
+            return;                     // nothing parsed yet
+        }
+
+        if (applyWanted) {
+            applyWanted = false;
+            if (!audio.isEmpty() && audioWanted > 0) {
+                player.setAudioTrack(audio.get(audioWanted % audio.size()).id);
+                Log.i(TAG, "applied audio ordinal " + audioWanted);
+            }
+            if (!spu.isEmpty() && spuWanted > 0) {
+                player.setSpuTrack(spu.get(spuWanted % spu.size()).id);
+                Log.i(TAG, "applied spu ordinal " + spuWanted);
+            }
+        }
+
+        updateTrackButtons();
+        Log.i(TAG, when + ": audio " + describe(player.getAudioTracks())
+                + " current=" + player.getAudioTrack()
+                + " | spu " + describe(player.getSpuTracks())
+                + " current=" + player.getSpuTrack());
+    }
+
+    /** The selectable audio tracks: libVLC always offers "Disable" as id -1 first. */
+    private List<MediaPlayer.TrackDescription> audioTracks() {
+        return withoutDisable(player.getAudioTracks());
+    }
+
+    /** Subtitle tracks including "Disable", which is what "off" means here. */
+    private List<MediaPlayer.TrackDescription> spuTracks() {
+        List<MediaPlayer.TrackDescription> out = new ArrayList<>();
+        MediaPlayer.TrackDescription[] tracks = player.getSpuTracks();
+        if (tracks != null) {
+            for (MediaPlayer.TrackDescription track : tracks) {
+                if (track != null) {
+                    out.add(track);
+                }
+            }
+        }
+        return out;
+    }
+
+    private static List<MediaPlayer.TrackDescription> withoutDisable(
+            MediaPlayer.TrackDescription[] tracks) {
+        List<MediaPlayer.TrackDescription> out = new ArrayList<>();
+        if (tracks != null) {
+            for (MediaPlayer.TrackDescription track : tracks) {
+                if (track != null && track.id >= 0) {
+                    out.add(track);
+                }
+            }
+        }
+        return out;
+    }
+
+    private void cycleAudio() {
+        List<MediaPlayer.TrackDescription> audio = audioTracks();
+        if (audio.isEmpty()) {
+            return;
+        }
+        audioWanted = (audioWanted + 1) % audio.size();
+        player.setAudioTrack(audio.get(audioWanted).id);
+        Log.i(TAG, "audio -> ordinal " + audioWanted + " id " + audio.get(audioWanted).id);
+        updateTrackButtons();
+        restartIdleTimer();
+    }
+
+    private void cycleSubs() {
+        List<MediaPlayer.TrackDescription> spu = spuTracks();
+        if (spu.isEmpty()) {
+            return;
+        }
+        spuWanted = (spuWanted + 1) % spu.size();
+        player.setSpuTrack(spu.get(spuWanted).id);
+        Log.i(TAG, "spu -> ordinal " + spuWanted + " id " + spu.get(spuWanted).id);
+        updateTrackButtons();
+        restartIdleTimer();
+    }
+
+    private void updateTrackButtons() {
+        if (audioButton == null) {
+            return;
+        }
+        List<MediaPlayer.TrackDescription> audio = audioTracks();
+        if (audio.isEmpty()) {
+            audioButton.setText("Audio: \u2014");
+        } else {
+            int index = Math.min(audioWanted, audio.size() - 1);
+            int id = player.getAudioTrack();
+            String label = null;
+            for (int i = 0; i < audio.size(); i++) {
+                if (audio.get(i).id == id) {
+                    index = i;
+                    label = codecLabel(audio.get(i).id);
+                    break;
+                }
+            }
+            if (label == null) {
+                label = codecLabel(audio.get(index).id);
+            }
+            audioButton.setText("Audio: " + (label != null ? label : "Track " + (index + 1))
+                    + (audio.size() > 1 ? "  (" + (index + 1) + "/" + audio.size() + ")" : ""));
+        }
+
+        List<MediaPlayer.TrackDescription> spu = spuTracks();
+        int spuId = player.getSpuTrack();
+        String spuLabel = "off";
+        for (MediaPlayer.TrackDescription track : spu) {
+            if (track.id == spuId && track.id >= 0) {
+                spuLabel = shortTrackName(track.name);
+                break;
+            }
+        }
+        subsButton.setText("Subs: " + spuLabel);
+    }
+
+    /**
+     * "mp2"/"ac-3" and friends. Comes from the media's own track table, because
+     * libVLC names both audio tracks here "Track 1 - [Swedish]" and "Track 2 -
+     * [Swedish]" - the language is identical, so the name cannot tell MPEG-1
+     * Layer II from AC-3 but the codec can.
+     */
+    private String codecLabel(int trackId) {
+        IMedia media = player == null ? null : player.getMedia();
+        if (media == null) {
+            return null;
+        }
+        for (int i = 0; i < media.getTrackCount(); i++) {
+            IMedia.Track track = media.getTrack(i);
+            if (track == null || track.id != trackId) {
+                continue;
+            }
+            String fourcc = fourcc(track.codec);
+            if (fourcc.startsWith("mp2") || fourcc.startsWith("mpga") || fourcc.startsWith("mp3")) {
+                return "MP2";
+            }
+            if (fourcc.startsWith("ac-3") || fourcc.startsWith("ac3")) {
+                return "AC-3";
+            }
+            if (fourcc.startsWith("ec-3")) {
+                return "E-AC-3";
+            }
+            if (fourcc.startsWith("aac")) {
+                return "AAC";
+            }
+            return fourcc.isEmpty() ? null : fourcc.toUpperCase();
+        }
+        return null;
+    }
+
+    /** libVLC hands back a four-character code packed into an int. */
+    private static String fourcc(int code) {
+        char[] out = new char[4];
+        for (int i = 0; i < 4; i++) {
+            out[i] = (char) ((code >> (8 * (3 - i))) & 0xff);
+        }
+        return new String(out).trim();
+    }
+
+    /**
+     * Shorten what libVLC reports for the teletext pages, e.g.
+     * "Teletext subtitles: hearing impaired - [Swedish]" -> "Subs HI (swe)".
+     * The pages look near-identical otherwise, and on SVT1 one of them is Danish,
+     * so the language has to stay visible.
+     */
+    private static String shortTrackName(String name) {
+        if (name == null || name.isEmpty()) {
+            return "(unnamed)";
+        }
+        String label = name;
+        String language = "";
+        int bracket = name.lastIndexOf('[');
+        if (bracket >= 0) {
+            int end = name.indexOf(']', bracket);
+            if (end > bracket) {
+                language = name.substring(bracket + 1, end).trim();
+                label = name.substring(0, bracket).trim();
+            }
+        }
+        if (label.endsWith("-")) {
+            label = label.substring(0, label.length() - 1).trim();
+        }
+        label = label.replace("Teletext subtitles:", "Subs")
+                     .replace("Teletext subtitles", "Subs")
+                     .replace("Teletext", "Teletext");
+        if (label.startsWith("Subs") && !label.equals("Subs")) {
+            label = "Subs " + label.substring(4).trim();
+        }
+        if (!language.isEmpty()) {
+            label = label + " (" + shortLanguage(language) + ")";
+        }
+        return label;
+    }
+
+    private static String shortLanguage(String language) {
+        if (language.startsWith("Swedish")) {
+            return "swe";
+        }
+        if (language.startsWith("Danish")) {
+            return "dan";
+        }
+        if (language.startsWith("Norwegian")) {
+            return "nor";
+        }
+        if (language.startsWith("Finnish")) {
+            return "fin";
+        }
+        return language;
     }
 
     private static String describe(MediaPlayer.TrackDescription[] tracks) {
