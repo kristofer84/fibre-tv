@@ -473,6 +473,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 + " current=" + player.getAudioTrack()
                 + " | spu " + describe(player.getSpuTracks())
                 + " current=" + player.getSpuTrack());
+        logMediaTracks(when);
     }
 
     /** The selectable audio tracks: libVLC always offers "Disable" as id -1 first. */
@@ -569,10 +570,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     /**
-     * "mp2"/"ac-3" and friends. Comes from the media's own track table, because
-     * libVLC names both audio tracks here "Track 1 - [Swedish]" and "Track 2 -
-     * [Swedish]" - the language is identical, so the name cannot tell MPEG-1
-     * Layer II from AC-3 but the codec can.
+     * Friendly name for the audio codec. libVLC names both audio tracks here
+     * "Track 1 - [Swedish]" and "Track 2 - [Swedish]", so the name cannot tell
+     * MPEG-1 Layer II from AC-3; the codec can.
+     *
+     * IMedia.Track carries both a String {@code codec} and an int {@code fourcc},
+     * and it is not documented which is populated for this stream, so this prefers
+     * the unambiguous int and falls back to the string. logMediaTracks prints both.
      */
     private String codecLabel(int trackId) {
         IMedia media = player == null ? null : player.getMedia();
@@ -584,31 +588,68 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             if (track == null || track.id != trackId) {
                 continue;
             }
-            String fourcc = fourcc(track.codec);
-            if (fourcc.startsWith("mp2") || fourcc.startsWith("mpga") || fourcc.startsWith("mp3")) {
-                return "MP2";
-            }
-            if (fourcc.startsWith("ac-3") || fourcc.startsWith("ac3")) {
-                return "AC-3";
-            }
-            if (fourcc.startsWith("ec-3")) {
-                return "E-AC-3";
-            }
-            if (fourcc.startsWith("aac")) {
-                return "AAC";
-            }
-            return fourcc.isEmpty() ? null : fourcc.toUpperCase();
+            String label = labelForFourcc(track.fourcc);
+            return label != null ? label : track.codec;
         }
         return null;
     }
 
-    /** libVLC hands back a four-character code packed into an int. */
-    private static String fourcc(int code) {
+    /**
+     * These are VLC's fourcc names, not the MP4 ones: AC-3 is "a52 " with a
+     * trailing space, so the comparison is a prefix test rather than equality.
+     */
+    private static String labelForFourcc(int fourcc) {
+        String code = fourccString(fourcc).trim();
+        if (code.isEmpty()) {
+            return null;
+        }
+        if (code.startsWith("mpga") || code.startsWith("mp2") || code.startsWith("mp3")) {
+            return "MP2";
+        }
+        if (code.startsWith("a52") || code.startsWith("ac-3")) {
+            return "AC-3";
+        }
+        if (code.startsWith("eac3")) {
+            return "E-AC-3";
+        }
+        if (code.startsWith("aac")) {
+            return "AAC";
+        }
+        return code.toUpperCase();
+    }
+
+    /** A four-character code packed into an int, untrimmed: "a52 " keeps its space. */
+    private static String fourccString(int fourcc) {
         char[] out = new char[4];
         for (int i = 0; i < 4; i++) {
-            out[i] = (char) ((code >> (8 * (3 - i))) & 0xff);
+            out[i] = (char) ((fourcc >> (8 * (3 - i))) & 0xff);
         }
-        return new String(out).trim();
+        return new String(out);
+    }
+
+    /**
+     * The media's own track table. Prints fourcc as both int and string next to the
+     * String codec, because which of the two carries the real value is the one
+     * thing that cannot be settled without looking at this stream.
+     */
+    private void logMediaTracks(String when) {
+        IMedia media = player == null ? null : player.getMedia();
+        if (media == null) {
+            return;
+        }
+        for (int i = 0; i < media.getTrackCount(); i++) {
+            IMedia.Track track = media.getTrack(i);
+            if (track == null) {
+                continue;
+            }
+            Log.i(TAG, when + ": media track " + i + " id=" + track.id + " type=" + track.type
+                    + " fourcc=0x" + Integer.toHexString(track.fourcc)
+                    + " ('" + fourccString(track.fourcc) + "')"
+                    + " codec='" + track.codec + "'"
+                    + " lang='" + track.language + "'"
+                    + " desc='" + track.description + "'"
+                    + " bitrate=" + track.bitrate);
+        }
     }
 
     /**
