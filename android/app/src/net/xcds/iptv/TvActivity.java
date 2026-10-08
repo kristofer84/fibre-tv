@@ -664,8 +664,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     private void hideChrome() {
-        Log.i(TAG, "chrome hidden");
         ui.removeCallbacks(idleHide);
+        if (!chromeVisible()) {
+            // The idle timer can fire long after something else hid the bar, and a
+            // second "hidden" line would make this log useless for timing anything.
+            return;
+        }
+        Log.i(TAG, "chrome hidden");
         controlsScroll.setVisibility(View.GONE);
         barScroll.setVisibility(View.GONE);
         card.setVisibility(View.GONE);
