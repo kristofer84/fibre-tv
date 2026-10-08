@@ -107,26 +107,32 @@ final class SettingsPanel {
      * - the overlay adds the scrim, the Activity just shows it.
      */
     View build() {
+        // The card is centred and never reaches a screen edge. It takes the height that is left
+        // after its margins and the content scrolls inside it, rather than hugging the content: a
+        // panel that hugged its content would put its own edge back on the screen edge as soon as
+        // the list was long, which is every list with a full channel count. The content is centred
+        // within the card, so a short list sits in the middle and a long one starts at the top and
+        // scrolls.
+        LinearLayout centring = new LinearLayout(host);
+        centring.setOrientation(LinearLayout.VERTICAL);
+        centring.setGravity(Gravity.CENTER_HORIZONTAL);
+
+        // The panel carries its own surface. On a television the video can be a hardware plane that
+        // the app's own scrim cannot dim, so legibility cannot depend on the overlay behind it: the
+        // picture stays visible around the column, and the column reads over anything.
+        FrameLayout card = new FrameLayout(host);
+        card.setBackgroundResource(R.drawable.card_bg);
+
         ScrollView scroll = new ScrollView(host);
         scroll.setBackgroundColor(Color.TRANSPARENT);
         scroll.setFillViewport(true);
 
-        FrameLayout centring = new FrameLayout(host);
-        // The panel carries its own surface. On a television the video can be a hardware plane that
-        // the app's own scrim cannot dim, so legibility cannot depend on the overlay behind it: the
-        // picture stays visible around the column, and the column reads over anything.
-        centring.setBackgroundResource(R.drawable.card_bg);
         LinearLayout root = new LinearLayout(host);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(24), insetPx(), dp(24), insetPx());
-        centring.addView(root, new FrameLayout.LayoutParams(
-                columnPx(), ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER_HORIZONTAL | Gravity.TOP));
-        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        cardParams.setMargins(dp(8), dp(8), dp(8), dp(8));
-        scroll.addView(centring, cardParams);
-
+        root.setGravity(Gravity.CENTER_VERTICAL);
+        root.setPadding(insetPx(), dp(24), insetPx(), dp(24));
+        scroll.addView(root, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // ---- profiles block
         heading(root, "Profiles");
         profileRow = new LinearLayout(host);
@@ -231,7 +237,15 @@ final class SettingsPanel {
         status.setPadding(0, dp(12), 0, 0);
         root.addView(status);
 
-        return scroll;
+        card.addView(scroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
+                columnPx(), 0, 1f);
+        cardParams.setMargins(dp(8), dp(32), dp(8), dp(32));
+        centring.addView(card, cardParams);
+
+        return centring;
     }
 
     /** A block heading: the grouping is the whole difference between a list and a form. */
