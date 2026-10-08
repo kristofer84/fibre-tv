@@ -721,11 +721,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         if (label.endsWith("-")) {
             label = label.substring(0, label.length() - 1).trim();
         }
-        label = label.replace("Teletext subtitles:", "Subs")
-                     .replace("Teletext subtitles", "Subs")
-                     .replace("Teletext", "Teletext");
-        if (label.startsWith("Subs") && !label.equals("Subs")) {
-            label = "Subs " + label.substring(4).trim();
+        // libVLC's names are descriptive but far too long for a button, and the
+        // three pages differ only in these words. "Teletext" on its own is the
+        // decoder, i.e. the page you get rather than a subtitle stream.
+        if (label.equals("Teletext subtitles: hearing impaired")) {
+            label = "Subs HI";
+        } else if (label.startsWith("Teletext subtitles")) {
+            label = "Subs";
         }
         if (!language.isEmpty()) {
             label = label + " (" + shortLanguage(language) + ")";
@@ -857,6 +859,19 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_DPAD_RIGHT:
+                // Across the two track buttons explicitly, for the same reason as
+                // up and down: focus search does not cross the controls row either.
+                // Falling through to showChromeFocused() moved focus to a channel
+                // button, so the next press retuned a channel instead of changing
+                // track - which is how a test run ended up on a different channel.
+                if (chromeVisible() && focusInControls()) {
+                    (audioButton.hasFocus() ? subsButton : audioButton).requestFocus();
+                    restartIdleTimer();
+                    return true;
+                }
+                showChromeFocused();
+                return true;
+
             case KeyEvent.KEYCODE_DPAD_CENTER:
             case KeyEvent.KEYCODE_ENTER:
             case KeyEvent.KEYCODE_MENU:
