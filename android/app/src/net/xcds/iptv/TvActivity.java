@@ -2,6 +2,7 @@ package net.xcds.iptv;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Typeface;
@@ -132,6 +133,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private HorizontalScrollView controlsScroll;
     private Button audioButton;
     private Button subsButton;
+    private Button settingsButton;
+
+    /**
+     * The controls row, in order. Left and right step along this rather than between two
+     * named buttons, so adding Settings to the row did not need a new key - and the
+     * AUDIO -> SUBS adjacency that was verified on the device is unchanged.
+     */
+    private final List<Button> controlButtons = new ArrayList<>();
     private TextView subtitleView;
     private FrameLayout.LayoutParams subtitleParams;
 
@@ -179,6 +188,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private Teletext.Listener subtitleListener;
 
     private int current = -1;
+
+    /**
+     * The playlist revision this screen loaded. Settings edits the list and bumps this, so
+     * coming back to the foreground is enough to notice - the two activities share nothing
+     * else.
+     */
+    private int loadedRevision;
 
     /**
      * Track choice, remembered across channel changes. Both are ordinals rather
@@ -273,9 +289,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
         buildUi();
 
-        channels.addAll(Channels.fromAssets(this, ASSET));
+        // The list is the saved m3u if the viewer has edited or imported one, and the copy
+        // staged into assets otherwise. Playlist guarantees the second of those if the
+        // first turns out to be unusable, so the list can be empty here only if the asset
+        // is missing or unreadable too.
+        channels.addAll(Playlist.load(this, ASSET));
+        loadedRevision = Playlist.revision(this);
         if (channels.isEmpty()) {
-            card.setText("no channels in assets/" + ASSET);
+            card.setText("no channels: fix the list in Settings");
             return;
         }
         buildChannelBar();
@@ -331,6 +352,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             vout.attachViews();
         } else {
             Log.i(TAG, "onStart: views were already attached");
+        }
+        // An edited list is picked up here. Settings bumps a revision when it saves, so
+        // returning to the foreground is enough to notice, and reloading before tuning means
+        // the tune uses the new list rather than the indices from the old one.
+        if (Playlist.revision(this) != loadedRevision) {
+            reloadPlaylist();
         }
         tune(current);
     }
@@ -472,8 +499,25 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         });
         subsButton.setOnFocusChangeListener(focusWatcher);
         subsButton.setOnTouchListener(holdChrome);
+        settingsButton = new Button(this);
+        settingsButton.setText("Settings");
+        settingsButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                // The player stops while Settings is open, because onStop drops the group
+                // membership, and tunes again on the way back - which is also when an
+                // edited list is picked up. See reloadPlaylist.
+                startActivity(new Intent(TvActivity.this, SettingsActivity.class));
+            }
+        });
+        settingsButton.setOnFocusChangeListener(focusWatcher);
+        settingsButton.setOnTouchListener(holdChrome);
         controls.addView(audioButton, controlParams());
         controls.addView(subsButton, controlParams());
+        controls.addView(settingsButton, controlParams());
+        controlButtons.add(audioButton);
+        controlButtons.add(subsButton);
+        controlButtons.add(settingsButton);
 
         controlsScroll = new HorizontalScrollView(this);
         controlsScroll.setHorizontalScrollBarEnabled(false);
@@ -556,6 +600,34 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             button.setOnTouchListener(holdChrome);
             bar.addView(button, controlParams());
             buttons.add(button);
+        }
+    }
+
+    /**
+     * Pick up a list that Settings has changed.
+     *
+     * Everything derived from the list is rebuilt here - the channel buttons, and the SDT
+     * name and subtitle-page caches that are sized to it - because after an edit the old
+     * indices mean nothing. The screen goes back to the first channel, which is the only
+     * index certainly valid in any list, and the tune that follows does the rest.
+     */
+    private void reloadPlaylist() {
+        loadedRevision = Playlist.revision(this);
+        channels.clear();
+        channels.addAll(Playlist.load(this, ASSET));
+        sdtNames = new String[channels.size()];
+        teletextPages = new ArrayList<>(channels.size());
+        for (int i = 0; i < channels.size(); i++) {
+            teletextPages.add(null);
+        }
+        buttons.clear();
+        bar.removeAllViews();
+        buildChannelBar();
+        current = 0;
+        updateBar();
+        Log.i(TAG, "playlist: reloaded, " + Playlist.describe(channels.size()));
+        if (channels.isEmpty()) {
+            card.setText("no channels: fix the list in Settings");
         }
     }
 
@@ -709,8 +781,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     private boolean focusInControls() {
-        View focused = getCurrentFocus();
-        return focused == audioButton || focused == subsButton;
+        return controlButtons.contains(getCurrentFocus());
     }
 
     // ------------------------------------------------------------- tuning it in
@@ -725,7 +796,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         current = index;
         Channels.Channel channel = channels.get(index);
 
-        showCard(title() + "\njoining " + channel.group() + ", please wait");
+        showCard(title() + "\njoining "
+                + (channel.multicast() ? channel.group() : channel.url) + ", please wait");
         updateBar();
         applyWanted = true;
         started = false;
@@ -739,8 +811,17 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         stopReader();
         showSubtitles(Collections.<String>emptyList());
         updateTrackButtons();
-        probeServiceName(index);
-        discoverSubtitlePages(index);
+        if (channel.multicast()) {
+            probeServiceName(index);
+            discoverSubtitlePages(index);
+        } else {
+            // One line per tune, rather than a silence that looks like a bug: the stream's
+            // own name and the teletext subtitle pages both come from joining the group,
+            // and a relay or http:// address has no group to join. Playback is unaffected -
+            // the bar keeps the playlist name and the Subtitles button finds no pages.
+            Log.i(TAG, "not a group address, so no stream name and no teletext subtitles: "
+                    + channel.url);
+        }
         updateSubsButton();
 
         Media media = new Media(libVLC, Uri.parse(channel.url));
@@ -1264,13 +1345,16 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
             case KeyEvent.KEYCODE_DPAD_LEFT:
             case KeyEvent.KEYCODE_DPAD_RIGHT:
-                // Across the two track buttons explicitly, for the same reason as
-                // up and down: focus search does not cross the controls row either.
-                // Falling through to showChromeFocused() moved focus to a channel
-                // button, so the next press retuned a channel instead of changing
-                // track - which is how a test run ended up on a different channel.
+                // Along the controls row explicitly, for the same reason as up and down:
+                // focus search does not cross that row either. Falling through to
+                // showChromeFocused() moved focus to a channel button, so the next press
+                // retuned a channel instead of changing track - which is how a test run
+                // ended up on a different channel.
                 if (chromeVisible() && focusInControls()) {
-                    (audioButton.hasFocus() ? subsButton : audioButton).requestFocus();
+                    int index = controlButtons.indexOf(getCurrentFocus());
+                    int step = keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : -1;
+                    int next = (index + step + controlButtons.size()) % controlButtons.size();
+                    controlButtons.get(next).requestFocus();
                     restartIdleTimer();
                     return true;
                 }

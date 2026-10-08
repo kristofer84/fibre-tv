@@ -54,6 +54,20 @@ final class Channels {
             }
             return 5500;
         }
+
+        /**
+         * True when this address is a group the device joins itself.
+         *
+         * That is what the SDT names and the teletext subtitles need, because both work
+         * by joining the multicast group: pointed at a relay or an http:// URL there is
+         * nothing to join, so the bar keeps the playlist name and Subtitles finds no
+         * pages. Playback itself is unaffected - libVLC handles raw MPEG-TS over HTTP
+         * exactly as it handles rtp:// - so this only decides what is worth attempting
+         * and what the log should say about it.
+         */
+        boolean multicast() {
+            return url.startsWith("rtp://") || url.startsWith("udp://");
+        }
     }
 
     private Channels() {

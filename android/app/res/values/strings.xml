@@ -1,4 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">the operator TV</string>
+    <!-- A separate label so the second launcher entry is distinguishable on a phone,
+         where both icons appear. -->
+    <string name="settings_name">the operator TV settings</string>
 </resources>

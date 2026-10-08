@@ -21,12 +21,24 @@
     <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
 
+    <!-- Plain http is the point of this app: the channel addresses are the ISP's rtp://
+         multicast groups or the viewer's own http relay, and the settings screen imports
+         playlists from a URL they type. Since targetSdk 28 the platform blocks cleartext
+         for the app's OWN traffic, which broke the import fetch with "Cleartext HTTP
+         traffic to <host> not permitted" - a failure that reads like a network problem
+         rather than a policy one.
+
+         Playback was never affected: libVLC opens its sockets natively and the platform's
+         cleartext policy does not apply to it. This flag is only about the one
+         HttpURLConnection this app makes, and a network security config cannot help here
+         because the host is whatever the viewer types. -->
     <application
         android:label="@string/app_name"
         android:icon="@drawable/ic_launcher"
         android:banner="@drawable/banner"
         android:allowBackup="false"
         android:extractNativeLibs="true"
+        android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen">
 
         <activity
@@ -39,6 +51,32 @@
                  for LEANBACK_LAUNCHER and aapt/Play report the app as a leanback
                  app only when they come from their own filter. LAUNCHER is kept
                  so the same apk can be side-loaded onto a phone for testing. -->
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Reachable two ways: the Settings button in the player, and its own launcher
+             entry. The second is the safety net for a playlist that does not play - the
+             player opens on the launcher's tile and its Settings button is built before
+             the channel list is read, so settings stay reachable even then. On Google TV
+             the launcher lists one tile per package, so that entry mostly matters on a
+             phone or tablet, where both icons appear; the button is the route that always
+             exists.
+
+             No screenOrientation here on purpose, unlike the player: a settings screen is
+             mostly typing, and typing on a phone in forced landscape is worse. -->
+        <activity
+            android:name="net.xcds.iptv.SettingsActivity"
+            android:label="@string/settings_name"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
