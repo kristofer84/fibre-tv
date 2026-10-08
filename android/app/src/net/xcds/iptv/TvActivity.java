@@ -29,6 +29,7 @@ import org.videolan.libvlc.interfaces.IVLCVout;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * The whole app: one activity that joins the channel's multicast group with libVLC
@@ -58,11 +59,19 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
     private static final String TAG = "iptv";
 
+    /**
+     * libvlc_media_track_type_t: audio is 0, video is 1, text is 2. Confirmed on
+     * device - the audio entries in the media track table report type=0 and the
+     * teletext ones type=2.
+     */
+    private static final int TRACK_TYPE_AUDIO = 0;
+
     private LibVLC libVLC;
     private MediaPlayer player;
     private IVLCVout vout;
 
     private SurfaceView surface;
+    private SurfaceView subtitlesSurface;
     private TextView card;
     private HorizontalScrollView barScroll;
     private LinearLayout bar;
@@ -139,6 +148,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
         vout = player.getVLCVout();
         vout.setVideoView(surface);
+        vout.setSubtitlesView(subtitlesSurface);
         vout.addCallback(this);
 
         surface.addOnLayoutChangeListener(new View.OnLayoutChangeListener() {
@@ -164,6 +174,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         // guard, an in-place apk update makes the next launch die in onStart with
         // "already attached or video view not configured" from AWindow.
         vout.setVideoView(surface);
+        vout.setSubtitlesView(subtitlesSurface);
         if (!vout.areViewsAttached()) {
             vout.attachViews();
         } else {
@@ -216,6 +227,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
+        // Teletext renders into a layer of its own, above the video. VLC's own
+        // layout does the same thing, and without the media overlay the subtitles
+        // surface can end up behind the video surface and show nothing.
+        subtitlesSurface = new SurfaceView(this);
+        subtitlesSurface.setZOrderMediaOverlay(true);
+        root.addView(subtitlesSurface, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+
         card = new TextView(this);
         card.setTextColor(Color.WHITE);
         card.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
@@ -258,6 +278,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
         controlsScroll = new HorizontalScrollView(this);
         controlsScroll.setHorizontalScrollBarEnabled(false);
+        // Not focusable on purpose: HorizontalScrollView turns focusability on in
+        // its own constructor, and as a focusable wrapper it swallows the D-pad, so
+        // focus search never reaches the buttons inside it.
+        controlsScroll.setFocusable(false);
         controlsScroll.addView(controls, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
@@ -266,6 +290,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         bar.setOrientation(LinearLayout.HORIZONTAL);
         barScroll = new HorizontalScrollView(this);
         barScroll.setHorizontalScrollBarEnabled(false);
+        barScroll.setFocusable(false);
         barScroll.addView(bar, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
@@ -366,6 +391,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
     private boolean chromeVisible() {
         return barScroll.getVisibility() == View.VISIBLE;
+    }
+
+    private boolean focusInControls() {
+        View focused = getCurrentFocus();
+        return focused == audioButton || focused == subsButton;
     }
 
     // ------------------------------------------------------------- tuning it in
@@ -473,8 +503,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 + " current=" + player.getAudioTrack()
                 + " | spu " + describe(player.getSpuTracks())
                 + " current=" + player.getSpuTrack());
-        logMediaTracks(when);
-    }
+        if ("playing".equals(when)) {
+            // Only worth printing there: the table is incomplete during the ES burst
+            // and identical afterwards, so logging it per ES event just floods.
+            logMediaTracks(when);
+        }    }
 
     /** The selectable audio tracks: libVLC always offers "Disable" as id -1 first. */
     private List<MediaPlayer.TrackDescription> audioTracks() {
@@ -540,19 +573,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         if (audio.isEmpty()) {
             audioButton.setText("Audio: \u2014");
         } else {
-            int index = Math.min(audioWanted, audio.size() - 1);
+            int index = 0;
             int id = player.getAudioTrack();
-            String label = null;
             for (int i = 0; i < audio.size(); i++) {
                 if (audio.get(i).id == id) {
                     index = i;
-                    label = codecLabel(audio.get(i).id);
                     break;
                 }
             }
-            if (label == null) {
-                label = codecLabel(audio.get(index).id);
-            }
+            String label = audioLabelFor(index);
             audioButton.setText("Audio: " + (label != null ? label : "Track " + (index + 1))
                     + (audio.size() > 1 ? "  (" + (index + 1) + "/" + audio.size() + ")" : ""));
         }
@@ -570,67 +599,69 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     /**
-     * Friendly name for the audio codec. libVLC names both audio tracks here
-     * "Track 1 - [Swedish]" and "Track 2 - [Swedish]", so the name cannot tell
-     * MPEG-1 Layer II from AC-3; the codec can.
+     * Friendly name for the nth audio track, from the media's own track table.
      *
-     * IMedia.Track carries both a String {@code codec} and an int {@code fourcc},
-     * and it is not documented which is populated for this stream, so this prefers
-     * the unambiguous int and falls back to the string. logMediaTracks prints both.
+     * The matchup is by ORDINAL, not by id: MediaPlayer's track ids are transport
+     * PIDs (3024, 4144) while the media track table numbers its entries 0..6, so
+     * an id comparison never matches anything - which is exactly how the first
+     * version of this managed to label both tracks "Track 1 (1/2)". Both lists are
+     * built in PMT order, so position is the meaningful correspondence, and it is
+     * checkable: this line's first audio track reports 'MPEG Audio layer 1/2' at
+     * 192 kbit/s, which is what the PMT says comes first.
      */
-    private String codecLabel(int trackId) {
+    private String audioLabelFor(int ordinal) {
         IMedia media = player == null ? null : player.getMedia();
         if (media == null) {
             return null;
         }
+        int seen = 0;
         for (int i = 0; i < media.getTrackCount(); i++) {
             IMedia.Track track = media.getTrack(i);
-            if (track == null || track.id != trackId) {
+            if (track == null || track.type != TRACK_TYPE_AUDIO) {
                 continue;
             }
-            String label = labelForFourcc(track.fourcc);
-            return label != null ? label : track.codec;
+            if (seen++ == ordinal) {
+                return labelForCodec(track.codec, track.fourcc);
+            }
         }
         return null;
     }
 
     /**
-     * VLC's own fourcc names, which are not the MP4 ones. Matched exactly after
-     * trimming, rather than by prefix: several are short enough to collide that
-     * way ("a52" against "a52b", "eac3" against "ac3"). The trim is load-bearing —
-     * VLC_CODEC_A52 is "a52 " with a trailing space, which is why "ac-3" never
-     * matches anything.
-     *
-     *   mpga  VLC_CODEC_MPGA  MPEG audio layers I-III; this line's track is Layer II
-     *   a52   VLC_CODEC_A52   AC-3
-     *   eac3  VLC_CODEC_EAC3  E-AC-3
-     *   mp4a  VLC_CODEC_MP4A  AAC
+     * VLC's descriptive codec string is the primary source ('MPEG Audio layer 1/2',
+     * 'A52 Audio (aka AC3)'); the fourcc is the fallback for when it is empty.
      */
-    private static String labelForFourcc(int fourcc) {
-        String code = fourccString(fourcc).trim();
-        if (code.isEmpty()) {
-            return null;
-        }
-        if (code.equals("mpga") || code.equals("mp1") || code.equals("mp2") || code.equals("mp3")) {
+    private static String labelForCodec(String codec, int fourcc) {
+        String text = codec == null ? "" : codec.toLowerCase(Locale.ROOT);
+        String code = fourccString(fourcc).trim().toLowerCase(Locale.ROOT);
+        if (text.contains("mpeg audio") || code.equals("mpga") || code.equals("mp1")
+                || code.equals("mp2") || code.equals("mp3")) {
             return "MP2";
         }
-        if (code.equals("a52")) {
+        if (text.contains("a52") || text.contains("ac3") || text.contains("ac-3")
+                || code.equals("a52")) {
             return "AC-3";
         }
-        if (code.equals("eac3")) {
+        if (text.contains("eac3") || text.contains("e-ac3") || code.equals("eac3")) {
             return "E-AC-3";
         }
-        if (code.equals("mp4a") || code.equals("aac")) {
+        if (text.contains("aac") || code.equals("mp4a")) {
             return "AAC";
         }
-        return code.toUpperCase();
+        return null;
     }
 
-    /** A four-character code packed into an int, untrimmed: "a52 " keeps its space. */
+    /**
+     * A four-character code packed into an int. VLC packs these little-endian via
+     * its VLC_FOURCC macro - 'm' is the LOW byte - so 'mpga' arrives as 0x6167706d.
+     * Reading it big-endian yields 'agpm', which is how the first version of this
+     * managed to render 'Audio: AGPM'. The string is returned untrimmed because
+     * VLC_CODEC_A52 is "a52 " with a trailing space.
+     */
     private static String fourccString(int fourcc) {
         char[] out = new char[4];
         for (int i = 0; i < 4; i++) {
-            out[i] = (char) ((fourcc >> (8 * (3 - i))) & 0xff);
+            out[i] = (char) ((fourcc >> (8 * i)) & 0xff);
         }
         return new String(out);
     }
@@ -794,13 +825,26 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 return true;
 
             case KeyEvent.KEYCODE_DPAD_UP:
-            case KeyEvent.KEYCODE_DPAD_DOWN:
-                // The framework only gets here when focus search finds nothing,
-                // which is exactly "the bar is not in use" -> toggle it.
-                if (chromeVisible()) {
-                    hideChrome();
-                } else {
+                // Move between the two rows explicitly rather than trusting focus
+                // search, which does not find the way up out of the channel row.
+                if (!chromeVisible()) {
                     showChromeFocused();
+                } else if (focusInControls()) {
+                    hideChrome();               // already on the top row
+                } else {
+                    audioButton.requestFocus();
+                }
+                return true;
+
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (!chromeVisible()) {
+                    showChromeFocused();
+                } else if (focusInControls()) {
+                    if (current >= 0 && current < buttons.size()) {
+                        buttons.get(current).requestFocus();
+                    }
+                } else {
+                    hideChrome();               // already on the bottom row
                 }
                 return true;
 
