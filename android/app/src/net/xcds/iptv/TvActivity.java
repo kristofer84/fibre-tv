@@ -68,23 +68,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private static final int TRACK_TYPE_AUDIO = 0;
 
     /**
-     * libvlc_meta_Title is 0. Written as a literal rather than Media.Meta.Title
-     * because I have not been able to dump that nested class, and guessing at an
-     * API cost a build earlier in this project. logMediaMetas prints every id so
-     * the device says where the service name lands instead.
+     * Worth recording because it looks like it should work: libVLC does populate a
+     * media title for these streams (meta id 0), but the value is the MRL -
+     * "rtp://233.171.129.211:5500" - and not the SDT service name. An earlier
+     * version of this app used it as a channel name and put that URL on the bar.
+     * The stream's own name is read from Sdt instead.
      */
-    private static final int META_TITLE = 0;
-
-    /** Highest meta id worth probing when logging; libvlc defines about 17. */
-    private static final int META_MAX = 20;
-
-    /**
-     * How long after Playing to look for the SDT service name again. The SDT is
-     * periodic in the transport stream (every 0.5-2 s) and Playing can fire before
-     * the demuxer has parsed it, so a single read at Playing would make a null
-     * title indistinguishable from libVLC never exposing the SDT at all.
-     */
-    private static final long META_RETRY_MS = 3000;
 
     private LibVLC libVLC;
     private MediaPlayer player;
@@ -134,7 +123,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     // emits no enclosing-method for anonymous classes declared in an initialiser,
     // and d8 (R8 8.2.2, from build-tools 34) crashes on that with a null-name NPE.
     private Runnable idleHide;
-    private Runnable metaRetry;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -151,17 +139,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                     return;                 // in use; hiding it would kill the D-pad
                 }
                 hideChrome();
-            }
-        };
-
-        metaRetry = new Runnable() {
-            @Override
-            public void run() {
-                // Logging only. Meta 0 for these streams turned out to be the MRL,
-                // so it must never be used as a channel name - doing exactly that
-                // is what put "rtp://233.171.129.211:5500" on the channel bar. The
-                // stream's own name comes from Sdt instead.
-                logMediaMetas();
             }
         };
 
@@ -243,7 +220,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     protected void onDestroy() {
         super.onDestroy();
         ui.removeCallbacks(idleHide);
-        ui.removeCallbacks(metaRetry);
         if (vout != null) {
             vout.removeCallback(this);
         }
@@ -502,7 +478,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         Channels.Channel channel = channels.get(index);
 
         showCard(title() + "\njoining " + channel.group() + ", please wait");
-        ui.removeCallbacks(metaRetry);
         updateBar();
         applyWanted = true;
         started = false;
@@ -537,9 +512,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 showCard(title());
                 restartIdleTimer();
                 onTracksAvailable("playing");
-                // See META_RETRY_MS: one more look once the SDT should have arrived.
-                ui.removeCallbacks(metaRetry);
-                ui.postDelayed(metaRetry, META_RETRY_MS);
                 break;
             case MediaPlayer.Event.Opening:
                 showCard(title() + "\njoining, please wait");
@@ -599,16 +571,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         }
 
         updateTrackButtons();
-        Log.i(TAG, when + ": audio " + describe(player.getAudioTracks())
-                + " current=" + player.getAudioTrack()
-                + " | spu " + describe(player.getSpuTracks())
-                + " current=" + player.getSpuTrack());
-        if ("playing".equals(when)) {
-            // Only worth printing there: the table is incomplete during the ES burst
-            // and identical afterwards, so logging it per ES event just floods.
-            logMediaTracks(when);
-            logMediaMetas();
-        }    }
+    }
 
     /** The selectable audio tracks: libVLC always offers "Disable" as id -1 first. */
     private List<MediaPlayer.TrackDescription> audioTracks() {
@@ -783,31 +746,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     /**
-     * The media's own track table. Prints fourcc as both int and string next to the
-     * String codec, because which of the two carries the real value is the one
-     * thing that cannot be settled without looking at this stream.
-     */
-    private void logMediaTracks(String when) {
-        IMedia media = player == null ? null : player.getMedia();
-        if (media == null) {
-            return;
-        }
-        for (int i = 0; i < media.getTrackCount(); i++) {
-            IMedia.Track track = media.getTrack(i);
-            if (track == null) {
-                continue;
-            }
-            Log.i(TAG, when + ": media track " + i + " id=" + track.id + " type=" + track.type
-                    + " fourcc=0x" + Integer.toHexString(track.fourcc)
-                    + " ('" + fourccString(track.fourcc) + "')"
-                    + " codec='" + track.codec + "'"
-                    + " lang='" + track.language + "'"
-                    + " desc='" + track.description + "'"
-                    + " bitrate=" + track.bitrate);
-        }
-    }
-
-    /**
      * Shorten what libVLC reports for the teletext pages, e.g.
      * "Teletext subtitles: hearing impaired - [Swedish]" -> "Subs HI (swe)".
      * The pages look near-identical otherwise, and on SVT1 one of them is Danish,
@@ -858,67 +796,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return "fin";
         }
         return language;
-    }
-
-    /**
-     * The name the stream gives itself. ffmpeg surfaces the same SDT descriptor as
-     * TAG:service_name, and VLC's TS demuxer sets the media title from it, so it
-     * should arrive as meta id 0 - but that is an expectation, not a measurement,
-     * so logMediaMetas prints every id and this only uses one that is non-empty.
-     */
-    private void readServiceName() {
-        IMedia media = player == null ? null : player.getMedia();
-        if (media == null || sdtNames == null || current < 0 || current >= sdtNames.length) {
-            return;
-        }
-        String title = safeMeta(media, META_TITLE);
-        if (title == null) {
-            return;
-        }
-        title = title.trim();
-        if (title.isEmpty() || title.equals(sdtNames[current])) {
-            return;
-        }
-        sdtNames[current] = title;
-        Log.i(TAG, "channel " + (current + 1) + " names itself '" + title + "'");
-        updateBar();
-        showCard(title());
-    }
-
-    private void logMediaMetas() {
-        IMedia media = player == null ? null : player.getMedia();
-        if (media == null) {
-            return;
-        }
-        for (int i = 0; i <= META_MAX; i++) {
-            String value = safeMeta(media, i);
-            if (value != null && !value.trim().isEmpty()) {
-                Log.i(TAG, "meta " + i + " = '" + value + "'");
-            }
-        }
-    }
-
-    /** getMeta is a JNI call; an out-of-range id is not worth a crash. */
-    private static String safeMeta(IMedia media, int id) {
-        try {
-            return media.getMeta(id);
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
-    private static String describe(MediaPlayer.TrackDescription[] tracks) {
-        if (tracks == null) {
-            return "null";
-        }
-        StringBuilder out = new StringBuilder("[");
-        for (MediaPlayer.TrackDescription track : tracks) {
-            if (track == null) {
-                continue;
-            }
-            out.append(track.id).append('=').append(track.name).append(' ');
-        }
-        return out.append(']').toString();
     }
 
     // --------------------------------------------------------------- multicast

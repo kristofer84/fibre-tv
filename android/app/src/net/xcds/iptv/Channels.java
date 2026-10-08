@@ -25,11 +25,21 @@ final class Channels {
             this.url = url;
         }
 
-        /** "rtp://@233.171.129.211:5500" -> "233.171.129.211". */
+        /**
+         * "rtp://@233.171.129.211:5500" -> "233.171.129.211".
+         *
+         * The @ is VLC's "join this multicast group" sigil and is not part of the
+         * address: passing it to InetAddress.getByName fails with
+         * UnknownHostException. That went unnoticed while this only fed the card's
+         * "joining..." text, and became fatal as soon as Sdt::serviceName used it
+         * as a hostname.
+         */
         String group() {
             int slash = url.lastIndexOf('/');
             int colon = url.lastIndexOf(':');
-            return (slash >= 0 && colon > slash) ? url.substring(slash + 1, colon) : url;
+            String group = (slash >= 0 && colon > slash)
+                    ? url.substring(slash + 1, colon) : url;
+            return group.startsWith("@") ? group.substring(1) : group;
         }
 
         /** "rtp://@233.171.129.211:5500" -> 5500. */
