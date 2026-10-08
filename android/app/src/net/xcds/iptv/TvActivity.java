@@ -643,6 +643,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     private void showChrome() {
+        // Logged because the interesting failures here are about timing - a bar that
+        // hides while a viewer is still choosing, or from under a finger - and the
+        // timestamps in this log are the only instrument that answers them.
+        Log.i(TAG, "chrome up");
         card.setVisibility(View.VISIBLE);
         controlsScroll.setVisibility(View.VISIBLE);
         barScroll.setVisibility(View.VISIBLE);
@@ -660,6 +664,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     private void hideChrome() {
+        Log.i(TAG, "chrome hidden");
         ui.removeCallbacks(idleHide);
         controlsScroll.setVisibility(View.GONE);
         barScroll.setVisibility(View.GONE);
