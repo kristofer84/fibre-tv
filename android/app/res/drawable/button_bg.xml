@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Focus is tested first on purpose: a row that is both playing and focused must read as
+     focused. Selected is the playing marker, which the player already sets with setSelected. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:drawable="@drawable/pill_focused"/>
+    <item android:state_selected="true" android:drawable="@drawable/pill_playing"/>
+    <item android:drawable="@drawable/pill_normal"/>
+</selector>

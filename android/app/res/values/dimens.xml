@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- TV safe area. Overscan eats roughly 5% of the frame, about 96px at 1080p, so both
+         screens keep this clear of every edge. One constant, two screens. -->
+    <dimen name="screen_inset">48dp</dimen>
+
+    <!-- A centred column rather than the full panel: fields 1824px wide look like a form
+         stretched to fill the screen instead of a settings list. -->
+    <dimen name="content_column">600dp</dimen>
+
+    <dimen name="pill_radius">12dp</dimen>
+    <dimen name="pill_padding_h">16dp</dimen>
+    <dimen name="pill_padding_v">8dp</dimen>
+    <dimen name="chrome_gap">8dp</dimen>
+
+    <!-- Sizes for a television: legible from a sofa, not sized for a finger. -->
+    <dimen name="chrome_text_size">16sp</dimen>
+    <dimen name="settings_text_size">14sp</dimen>
+    <dimen name="settings_field_height">44dp</dimen>
+</resources>

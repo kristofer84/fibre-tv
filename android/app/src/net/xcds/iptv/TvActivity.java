@@ -8,6 +8,7 @@ import android.graphics.PixelFormat;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -98,7 +99,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * the bar away the overlay drops to 24dp, which is where subtitles belong.
      */
     private static final int SUBTITLE_MARGIN_IDLE_DP = 48;
-    private static final int SUBTITLE_MARGIN_CHROME_DP = 140;
+    private static final int SUBTITLE_MARGIN_CHROME_DP = 190;
 
     /** Subtitle text size. 26sp is 85% of the 30sp this started at. */
     private static final int SUBTITLE_TEXT_SP = 26;
@@ -130,7 +131,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private HorizontalScrollView barScroll;
     private LinearLayout bar;
     private LinearLayout controls;
+    private LinearLayout bottom;
     private HorizontalScrollView controlsScroll;
+    /** Bumped on every show and hide so a finishing fade cannot hide a freshly shown bar. */
+    private int chromeGeneration;
+    private static final long CHROME_ANIM_MS = 150;
     private Button audioButton;
     private Button subsButton;
     private Button settingsButton;
@@ -498,20 +503,23 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         card.setTextColor(Color.WHITE);
         card.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
         card.setPadding(dp(16), dp(10), dp(16), dp(10));
-        card.setBackgroundColor(0xC0000000);
+        card.setBackgroundResource(R.drawable.card_bg);
         FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT);
         cardParams.gravity = Gravity.TOP | Gravity.START;
-        cardParams.setMargins(dp(32), dp(32), 0, 0);
+        cardParams.setMargins(insetPx(), insetPx(), 0, 0);
         root.addView(card, cardParams);
 
         // Two rows at the bottom: the track controls, then the channels. Keeping
         // them in separate rows means the D-pad can move between them and a long
         // channel name cannot scroll the controls out of reach.
-        LinearLayout bottom = new LinearLayout(this);
+        bottom = new LinearLayout(this);
         bottom.setOrientation(LinearLayout.VERTICAL);
-        bottom.setBackgroundColor(0x80000000);
+        // A gradient scrim rather than a hard-edged panel, and full bleed with the rows inset
+        // by the TV safe area: the chrome sits on the picture instead of in a box.
+        bottom.setBackgroundResource(R.drawable.scrim);
+        bottom.setPadding(insetPx(), dp(24), insetPx(), insetPx());
 
         controls = new LinearLayout(this);
         controls.setOrientation(LinearLayout.HORIZONTAL);
@@ -522,6 +530,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 cycleAudio();
             }
         });
+        stylePill(audioButton, R.drawable.ic_audio);
         audioButton.setOnFocusChangeListener(focusWatcher);
         // The listener has to be on the BUTTONS, not only on the bars around them: a
         // Button consumes the gesture itself, so a finger resting on one never reaches
@@ -535,6 +544,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 cycleSubs();
             }
         });
+        stylePill(subsButton, R.drawable.ic_subs);
         subsButton.setOnFocusChangeListener(focusWatcher);
         subsButton.setOnTouchListener(holdChrome);
         settingsButton = new Button(this);
@@ -548,6 +558,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 startActivity(new Intent(TvActivity.this, SettingsActivity.class));
             }
         });
+        stylePill(settingsButton, R.drawable.ic_settings);
         settingsButton.setOnFocusChangeListener(focusWatcher);
         settingsButton.setOnTouchListener(holdChrome);
         controls.addView(audioButton, controlParams());
@@ -593,7 +604,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT);
         bottomParams.gravity = Gravity.BOTTOM;
-        bottomParams.setMargins(dp(32), 0, dp(32), dp(32));
         root.addView(bottom, bottomParams);
 
         setContentView(root);
@@ -634,6 +644,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                     restartIdleTimer();
                 }
             });
+            stylePill(button, 0);
             button.setOnFocusChangeListener(focusWatcher);
             button.setOnTouchListener(holdChrome);
             bar.addView(button, controlParams());
@@ -757,7 +768,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         // hides while a viewer is still choosing, or from under a finger - and the
         // timestamps in this log are the only instrument that answers them.
         Log.i(TAG, "chrome up");
+        chromeGeneration++;
         card.setVisibility(View.VISIBLE);
+        bottom.setVisibility(View.VISIBLE);
+        bottom.animate().cancel();
+        bottom.setAlpha(0f);
+        bottom.setTranslationY(dp(16));
+        bottom.animate().alpha(1f).translationY(0f).setDuration(CHROME_ANIM_MS).start();
         controlsScroll.setVisibility(View.VISIBLE);
         barScroll.setVisibility(View.VISIBLE);
         placeSubtitles(true);
@@ -781,11 +798,24 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return;
         }
         Log.i(TAG, "chrome hidden");
-        controlsScroll.setVisibility(View.GONE);
-        barScroll.setVisibility(View.GONE);
-        card.setVisibility(View.GONE);
         placeSubtitles(false);
+        card.setVisibility(View.GONE);
         surface.requestFocus();
+        // Fade and slide out, then take the views away - by generation, so that showing the
+        // bar again during those 150ms is not undone by this finishing.
+        final int generation = ++chromeGeneration;
+        bottom.animate().cancel();
+        bottom.animate().alpha(0f).translationY(dp(16)).setDuration(CHROME_ANIM_MS).start();
+        ui.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (generation == chromeGeneration) {
+                    controlsScroll.setVisibility(View.GONE);
+                    barScroll.setVisibility(View.GONE);
+                    bottom.setVisibility(View.GONE);
+                }
+            }
+        }, CHROME_ANIM_MS);
     }
 
     /**
@@ -1478,6 +1508,39 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         restartIdleTimer();
         ui.removeCallbacks(tuneTyped);
         ui.postDelayed(tuneTyped, DIGIT_TIMEOUT_MS);
+    }
+
+    /**
+     * One button style for the whole chrome: flat and translucent until focused, filled with
+     * the accent when focused, mixed case, and an optional icon that follows the same colour
+     * states. The minimum sizes are cleared because the theme's touch-sized ones are what made
+     * a television interface look like a phone form.
+     */
+    private void stylePill(Button button, int iconRes) {
+        button.setAllCaps(false);
+        button.setBackgroundResource(R.drawable.button_bg);
+        button.setTextColor(getResources().getColorStateList(R.color.button_text));
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP,
+                getResources().getDimension(R.dimen.chrome_text_size)
+                        / getResources().getDisplayMetrics().density);
+        button.setPadding(dp(16), dp(8), dp(16), dp(8));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        if (iconRes != 0) {
+            button.setCompoundDrawablesWithIntrinsicBounds(iconRes, 0, 0, 0);
+            button.setCompoundDrawablePadding(dp(8));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                button.setCompoundDrawableTintList(
+                        getResources().getColorStateList(R.color.button_text));
+            }
+        }
+    }
+
+    /** The TV safe area, in pixels. Both screens use it, so overscan cannot eat either. */
+    private int insetPx() {
+        return (int) getResources().getDimension(R.dimen.screen_inset);
     }
 
     private int dp(int value) {

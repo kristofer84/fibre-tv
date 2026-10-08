@@ -87,12 +87,15 @@ aapt package -f -m \
     -F "$BUILD/app.apk"
 
 step "compile (javac, against android.jar + libvlc)"
+# aapt generated the R class into $BUILD/gen and it is compiled here with the app: until the
+# chrome was restyled from resources no Java file referred to R, so it was never needed.
 javac -source 8 -target 8 -Xlint:-options \
     -bootclasspath "$ANDROID_JAR" \
     -classpath "$VLC_JAR" \
     -encoding UTF-8 \
     -d "$BUILD/classes" \
-    $(find "$APP/src" -name '*.java')
+    $(find "$APP/src" -name '*.java') \
+    $(find "$BUILD/gen" -name '*.java')
 
 step "dex (d8)"
 # libVLC's classes.jar is an *input*, not --classpath: not passing it would tell d8

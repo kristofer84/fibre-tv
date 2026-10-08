@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ONE accent. The focused pill is filled with it and the playing marker borrows it, so
+         changing this value changes the whole chrome - that is the point of it being here.
+         Pale grey on dark is the neutral choice for a television. -->
+    <color name="accent">#FFF2F2F2</color>
+
+    <!-- Text: dark on the focused fill, light everywhere else. -->
+    <color name="chrome_text">#FFD8D8D8</color>
+    <color name="chrome_text_focused">#FF101010</color>
+    <color name="chrome_text_playing">#FFFFFFFF</color>
+
+    <!-- The two flat states. Unfocused is a translucent dark pill rather than a boxed
+         button: that contrast against the filled focused state is what reads as a TV menu. -->
+    <color name="pill_normal">#66000000</color>
+    <color name="pill_playing">#38FFFFFF</color>
+
+    <!-- The scrim behind the chrome, so the rows sit on the picture instead of in a panel. -->
+    <color name="scrim_top">#00000000</color>
+    <color name="scrim_bottom">#D9000000</color>
+</resources>

@@ -12,6 +12,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -67,6 +68,35 @@ public class SettingsActivity extends Activity {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
+    /** The TV safe area, shared with the player's chrome. */
+    private int insetPx() {
+        return (int) getResources().getDimension(R.dimen.screen_inset);
+    }
+
+    /**
+     * A centred column rather than the full panel. Full-bleed fields read as a form stretched
+     * to fit; this reads as a settings list, and it keeps long addresses from spanning the
+     * whole screen.
+     */
+    private int columnPx() {
+        int available = getResources().getDisplayMetrics().widthPixels - 2 * insetPx();
+        int wanted = (int) getResources().getDimension(R.dimen.content_column);
+        return Math.min(available, wanted);
+    }
+
+    /** The TV pill, same resource as the player's chrome, so settings matches it. */
+    private void stylePill(Button button, int textSp) {
+        button.setAllCaps(false);
+        button.setBackgroundResource(R.drawable.button_bg);
+        button.setTextColor(getResources().getColorStateList(R.color.button_text));
+        button.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSp);
+        button.setPadding(dp(14), dp(6), dp(14), dp(6));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -83,11 +113,16 @@ public class SettingsActivity extends Activity {
     private View buildUi() {
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(Color.BLACK);
+        scroll.setFillViewport(true);
 
+        FrameLayout centring = new FrameLayout(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(24), dp(24), dp(24), dp(24));
-        scroll.addView(root, new ViewGroup.LayoutParams(
+        root.setPadding(0, insetPx(), 0, insetPx());
+        centring.addView(root, new FrameLayout.LayoutParams(
+                columnPx(), ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER_HORIZONTAL | Gravity.TOP));
+        scroll.addView(centring, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
@@ -118,9 +153,7 @@ public class SettingsActivity extends Activity {
         nameLabel.setTextColor(0xFF9E9E9E);
         nameRow.addView(nameLabel);
         profileNameField = new EditText(this);
-        profileNameField.setTextColor(Color.WHITE);
-        profileNameField.setHintTextColor(0xFF757575);
-        profileNameField.setSingleLine(true);
+        styleField(profileNameField, "profile name", 1f);
         nameRow.addView(profileNameField, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
         root.addView(nameRow);
@@ -176,16 +209,14 @@ public class SettingsActivity extends Activity {
         importRow.setGravity(Gravity.CENTER_VERTICAL);
 
         urlField = new EditText(this);
-        urlField.setHint("https://example/playlist.m3u");
-        urlField.setTextColor(Color.WHITE);
-        urlField.setHintTextColor(0xFF757575);
+        styleField(urlField, "https://example/playlist.m3u", 1f);
         urlField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
-        urlField.setSingleLine(true);
         importRow.addView(urlField, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         importButton = new Button(this);
         importButton.setText("Import");
+        stylePill(importButton, 14);
         importButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -208,11 +239,29 @@ public class SettingsActivity extends Activity {
         Button button = new Button(this);
         button.setText(label);
         button.setOnClickListener(listener);
+        stylePill(button, (int) getResources().getDimension(R.dimen.settings_text_size)
+                / (int) getResources().getDisplayMetrics().density);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(0, dp(10), 0, 0);
+        params.setMargins(0, dp(8), 0, 0);
         button.setLayoutParams(params);
         return button;
+    }
+
+    /** A field sized for a television: one line, no taller than it needs to be. */
+    private void styleField(EditText field, String hint, float weight) {
+        field.setHint(hint);
+        field.setTextColor(Color.WHITE);
+        field.setHintTextColor(0xFF8A8A8A);
+        field.setSingleLine(true);
+        field.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        field.setPadding(dp(10), dp(6), dp(10), dp(6));
+        // The same pill as everything else, so a field reads as part of the list rather than
+        // as the theme's underlined form control - which is most of what looked like a form
+        // stretched across the screen.
+        field.setBackgroundResource(R.drawable.pill_normal);
+        field.setLayoutParams(new LinearLayout.LayoutParams(
+                0, (int) getResources().getDimension(R.dimen.settings_field_height), weight));
     }
 
     /** One channel: name and address, and a way to drop it. */
@@ -222,26 +271,21 @@ public class SettingsActivity extends Activity {
         row.setGravity(Gravity.CENTER_VERTICAL);
 
         EditText nameField = new EditText(this);
-        nameField.setHint("name");
+        styleField(nameField, "name", 3f);
         nameField.setText(name);
-        nameField.setTextColor(Color.WHITE);
-        nameField.setHintTextColor(0xFF757575);
-        nameField.setSingleLine(true);
         row.addView(nameField, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 3f));
 
         EditText addressField = new EditText(this);
-        addressField.setHint("rtp://@233.184.48.101:5500  or  http://host:port/path");
-        addressField.setText(address);
-        addressField.setTextColor(Color.WHITE);
-        addressField.setHintTextColor(0xFF757575);
+        styleField(addressField, "rtp://@233.184.48.101:5500  or  http://host:port/path", 5f);
         addressField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
-        addressField.setSingleLine(true);
+        addressField.setText(address);
         row.addView(addressField, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 5f));
 
         Button remove = new Button(this);
         remove.setText("Remove");
+        stylePill(remove, 14);
         remove.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
