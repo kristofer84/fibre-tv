@@ -86,6 +86,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private static final long SUBTITLE_POLL_MS = 250;
 
     /**
+     * Where the subtitle overlay sits. Two margins for two states: a normal TV
+     * subtitle position while the chrome is hidden, and raised clear of the two
+     * rows of chrome while it is showing, so the channel bar never covers the text.
+     * The chrome hides itself again after four seconds.
+     */
+    private static final int SUBTITLE_MARGIN_IDLE_DP = 56;
+    private static final int SUBTITLE_MARGIN_CHROME_DP = 140;
+
+    /**
      * Worth recording because it looks like it should work: libVLC does populate a
      * media title for these streams (meta id 0), but the value is the MRL -
      * "rtp://233.171.129.211:5500" - and not the SDT service name. An earlier
@@ -107,6 +116,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private Button audioButton;
     private Button subsButton;
     private TextView subtitleView;
+    private FrameLayout.LayoutParams subtitleParams;
 
     private final List<Channels.Channel> channels = new ArrayList<>();
     private final List<Button> buttons = new ArrayList<>();
@@ -359,14 +369,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         subtitleView.setMaxWidth(dp(900));
         applyReadingFont(subtitleView);
         subtitleView.setVisibility(View.GONE);
-        FrameLayout.LayoutParams subtitleParams = new FrameLayout.LayoutParams(
+        subtitleParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT);
         subtitleParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        // Clears both rows of chrome so the text never sits under the channel bar
-        // while it is up. The chrome hides itself after four seconds; this is the
-        // position that works while it is showing, which is the case that matters.
-        subtitleParams.setMargins(dp(32), 0, dp(32), dp(140));
+        placeSubtitles(false);
         root.addView(subtitleView, subtitleParams);
 
         card = new TextView(this);
@@ -534,6 +541,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         card.setVisibility(View.VISIBLE);
         controlsScroll.setVisibility(View.VISIBLE);
         barScroll.setVisibility(View.VISIBLE);
+        placeSubtitles(true);
         restartIdleTimer();
     }
 
@@ -551,7 +559,24 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         controlsScroll.setVisibility(View.GONE);
         barScroll.setVisibility(View.GONE);
         card.setVisibility(View.GONE);
+        placeSubtitles(false);
         surface.requestFocus();
+    }
+
+    /**
+     * Moves the subtitles out of the chrome's way only while the chrome is up. With
+     * the bar hidden they sit where a viewer expects subtitles to sit, rather than
+     * floating a fifth of the screen above the bottom for no reason.
+     */
+    private void placeSubtitles(boolean chromeUp) {
+        if (subtitleParams == null) {
+            return;
+        }
+        int bottom = chromeUp ? SUBTITLE_MARGIN_CHROME_DP : SUBTITLE_MARGIN_IDLE_DP;
+        subtitleParams.setMargins(dp(32), 0, dp(32), dp(bottom));
+        if (subtitleView != null) {
+            subtitleView.setLayoutParams(subtitleParams);
+        }
     }
 
     private void restartIdleTimer() {
