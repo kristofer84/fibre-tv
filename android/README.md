@@ -4,10 +4,16 @@ A single-screen Android TV app that plays the seven channels in
 [`../channels.m3u8`](../channels.m3u8). Built for a Chromecast with Google TV;
 works on any Android TV or Fire TV device that is on the home LAN.
 
+The list is editable in the app and can be imported from a URL, several profiles can
+be kept side by side, and a profile may point at an HTTP relay instead of the
+multicast group. `channels.m3u8` is the list it starts from, not the only one it can
+play - see [Settings](#settings).
+
 It joins the multicast group itself with **libVLC** — the same engine, and the
 same `rtp://@group:port` URLs, that desktop VLC uses. So there is no relay, no
 HTTP hop, no HLS and no transcoding anywhere: `channels.m3u8` is the only source
-of truth, and it is staged into the apk at build time.
+of truth, and it is staged into the apk at build time. A relay playlist (`http://…`)
+is played by the same libVLC path.
 
 That is also what makes the audio work. The streams carry MP2 and AC3, which
 browsers and cast receivers cannot decode — every browser-based approach needs
@@ -21,12 +27,64 @@ app plays the stream exactly as it arrives.
 | D-pad up/down | show or hide the channel bar (also reveals it, then focuses the current channel) |
 | D-pad left/right | move along the channel bar |
 | D-pad centre | tune the highlighted channel |
-| `1`–`9` | tune that channel directly |
+| `1`–`9` | tune that channel directly; digits typed within 1.5 s tune together, so `12` is channel 12 |
+| channel up/down | previous and next channel |
+| subtitles | teletext subtitles, if the channel offers any |
+| settings | open the settings panel over the playing picture |
 | back | hide the bar, or leave the app once it is hidden |
 
 The bar focuses the *playing* channel when it appears, so the focus highlight is
 also the "this one is live" marker, and it hides itself after a few seconds once
 focus is no longer in it.
+
+### Settings
+
+The Settings control in the chrome opens the panel **over the playing picture**. The
+stream, the multicast membership and the subtitle reader all keep running while the
+list is edited, and that is the point rather than a nicety: a separate settings
+*activity* runs the player's `onStop`, which stops playback and drops the group - the
+behaviour described below that keeps a forgotten stream off the LAN. So the panel is
+hosted by the player, added to its own view tree, and the player's lifecycle never
+changes. The standalone settings screen still exists and is still the route to use
+when nothing plays at all, or on a phone; both hosts build the same panel.
+
+In the panel:
+
+- **Profiles.** A name plus a saved m3u list. `LAN` is created on first run from the
+  built-in list; `New profile` copies the list that is on screen; switching saves and
+  reloads around the switch. The active one is the filled chip.
+- **Channels.** A name over its address, both editable, with `Remove` in its own
+  column. Nothing is applied until `Save`, deliberately: a half-typed address should
+  not retune the picture.
+- **Import a playlist.** Fetches an m3u from a URL. The status code is checked, the
+  body is capped at 1 MB, and the text has to parse to at least one channel - which is
+  what catches a URL that returns an HTML error page with a 200. A failure changes
+  nothing at all.
+- **Reset to the built-in list** goes back to `channels.m3u8`; **About and licences**
+  lists the third-party code inside the apk, read from its own assets.
+
+### Audio delay, per-track trim, and a stall watchdog
+
+The streams carry MP2 and AC3, and the two are rarely the same loudness - on this line
+the AC-3 arrives several dB below the MP2 it is paired with. So:
+
+- **Delay** shifts audio against the picture, in milliseconds. libVLC takes
+  microseconds; the conversion happens in one place.
+- **Per-track trim** is a percentage of libVLC's own volume, captured once as the 100%
+  baseline. It is expressed that way because `setVolume`'s range is not documented
+  anywhere reliable, and a percentage of a known baseline behaves predictably without
+  needing to know it. Tracks are matched by **order**, not by codec name, because the
+  media track table only lists the first audio elementary stream - worth knowing
+  before changing it.
+- **The watchdog.** Ten seconds with no traffic on the input re-tunes, up to three
+  times, then says so on screen instead of looping. The signal is
+  `TrafficStats.getUidRxBytes`, and it is worth recording why, because the obvious
+  candidates do not work: `getTime()` and `getPosition()` both report 0 for a live
+  multicast, `IMedia.getStats()` freezes at one value while the picture is perfect,
+  and `/proc/net/dev` is not readable by an app. What the counter cannot see is bytes
+  still arriving while nothing decodes - an operator re-mux - and there is no working
+  picture counter to fall back on (`displayedPictures` stays 0 even while playing).
+  That limit is documented rather than papered over.
 
 ### Two Android-specific things
 
@@ -102,6 +160,15 @@ Two things here are worth knowing before changing it:
 
 The probe joins the group briefly, once per channel, and leaves immediately. It is
 best-effort and logged, so a channel that stops naming itself shows up in logcat.
+
+Both sniffers read their bytes through one seam, `Ts`, so a channel that is an HTTP
+relay gets its name and its subtitles too - the difference between working on the LAN
+and working over the VPN as well. Multicast is the original path and is unchanged:
+join the group, read RTP datagrams. HTTP is additive: one GET and a packetiser that
+finds packet alignment from the sync byte rather than assuming it, so neither parser
+had to change. Cost was the constraint: the probe is one short connection that closes
+immediately, and the subtitle reader exists only while subtitles are on - measured
+with `ss` on the relay, one connection with subtitles off and two with them on.
 `234.213.112.43` (Lokal kanal) is the one that never does: it is the odd feed out,
 with a non-standard service_type and an `Intinor` provider, and `ffprobe` cannot
 read a name from it either.
@@ -115,7 +182,7 @@ uploaded as a workflow artifact; push a tag to get a release with it attached,
 which *Downloader* on the TV can then install straight from the asset URL:
 
 ```sh
-git tag v1.1 && git push --tags
+git tag v1.4 && git push --tags
 ```
 
 The toolchain is cached between runs, keyed on `build.sh`, since that is where the
@@ -194,6 +261,7 @@ that gets handed around, those texts are packaged *inside* it under
 | component | licence |
 |---|---|
 | libVLC — `libvlc.so`, `libvlcjni.so` | LGPL-2.1-or-later |
+| Literata — the subtitle font | SIL OFL 1.1 |
 | LLVM libc++ — `libc++_shared.so` | Apache-2.0 with LLVM exceptions |
 | this app | MIT |
 
@@ -207,12 +275,16 @@ Built, installed and run on a **Chromecast with Google TV (4K)**, Android 14,
 product `sabrina`. Confirmed working: video plays, channel switching from the
 remote reaches the right multicast group, and leaving the app drops the
 membership (1 stray packet after HOME, against ~181 in the same window while
-playing).
+playing). Confirmed since: DVB teletext subtitles decoded and drawn over both
+multicast and a relay; channel names read from the stream over both; the settings
+panel holding the remote while the stream keeps running behind it; audio delay and
+per-track trims; and the watchdog re-tuning a stalled input three times and then
+saying so.
 
 `sabrina` is worth knowing about: it has a **32-bit userspace** —
 `ro.product.cpu.abilist` is `armeabi-v7a,armeabi` and `abilist64` is empty — so
 an arm64-only apk is refused outright with `INSTALL_FAILED_NO_MATCHING_ABIS`.
 Both ABIs are therefore packaged, which is why the apk is 42 MB rather than 22.
 
-Still untested: the other channels beyond the ones switched through, DVB
-teletext subtitles, and `--network-caching` under a weak WiFi link.
+Still untested: the channels beyond the ones switched through, and
+`--network-caching` under a weak WiFi link.

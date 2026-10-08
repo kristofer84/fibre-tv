@@ -7,6 +7,10 @@ Includes the channel list, which isn't published anywhere.
 The most common pitfall: the router's IGMP proxy needs a VLAN interface as upstream,
 otherwise it fails silently. See [router.md](router.md).
 
+There is also a small **Android TV app** in [`android/`](android/README.md) that plays
+the same channels on a Chromecast with Google TV, joining the multicast group with
+libVLC instead of relaying anything.
+
 | file | contents |
 |---|---|
 | [isp.md](isp.md) | the fibre line and which VLAN carries TV |
@@ -15,6 +19,9 @@ otherwise it fails silently. See [router.md](router.md).
 | [router.md](router.md) | EdgeOS configuration and common problems |
 | [watching.md](watching.md) | playlists for the LAN and over a VPN |
 | [measurements.md](measurements.md) | bandwidth, LAN and WiFi impact, measuring it |
+| [android/README.md](android/README.md) | the Android TV app: what it does, and how it is built and installed |
+| [android/THIRD-PARTY.md](android/THIRD-PARTY.md) | the licences of the code inside the apk |
+| [CHANGELOG.md](CHANGELOG.md) | what changed in each version of the app |
 
 ### Scope
 

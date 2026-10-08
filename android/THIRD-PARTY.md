@@ -27,6 +27,13 @@ Bundled inside the same aar as libVLC's C++ runtime, licensed under the
 **Apache License 2.0 with LLVM Exceptions**. Full text:
 [`licenses/LLVM.txt`](licenses/LLVM.txt). Source: <https://llvm.org/>.
 
+### Literata — the subtitle font
+
+The reading font for the subtitle overlay, from
+[Literata](https://github.com/googlefonts/literata), licensed under the **SIL Open
+Font License 1.1**. Full text: [`licenses/OFL.txt`](licenses/OFL.txt). The OFL wants
+the licence to travel with the font, so it is copied into the apk beside the others.
+
 ### Deliberately not bundled
 
 The aar also carries VLC's `assets/lua/` and `assets/hrtfs/` trees. Neither is
