@@ -595,24 +595,32 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     /**
-     * These are VLC's fourcc names, not the MP4 ones: AC-3 is "a52 " with a
-     * trailing space, so the comparison is a prefix test rather than equality.
+     * VLC's own fourcc names, which are not the MP4 ones. Matched exactly after
+     * trimming, rather than by prefix: several are short enough to collide that
+     * way ("a52" against "a52b", "eac3" against "ac3"). The trim is load-bearing —
+     * VLC_CODEC_A52 is "a52 " with a trailing space, which is why "ac-3" never
+     * matches anything.
+     *
+     *   mpga  VLC_CODEC_MPGA  MPEG audio layers I-III; this line's track is Layer II
+     *   a52   VLC_CODEC_A52   AC-3
+     *   eac3  VLC_CODEC_EAC3  E-AC-3
+     *   mp4a  VLC_CODEC_MP4A  AAC
      */
     private static String labelForFourcc(int fourcc) {
         String code = fourccString(fourcc).trim();
         if (code.isEmpty()) {
             return null;
         }
-        if (code.startsWith("mpga") || code.startsWith("mp2") || code.startsWith("mp3")) {
+        if (code.equals("mpga") || code.equals("mp1") || code.equals("mp2") || code.equals("mp3")) {
             return "MP2";
         }
-        if (code.startsWith("a52") || code.startsWith("ac-3")) {
+        if (code.equals("a52")) {
             return "AC-3";
         }
-        if (code.startsWith("eac3")) {
+        if (code.equals("eac3")) {
             return "E-AC-3";
         }
-        if (code.startsWith("aac")) {
+        if (code.equals("mp4a") || code.equals("aac")) {
             return "AAC";
         }
         return code.toUpperCase();
