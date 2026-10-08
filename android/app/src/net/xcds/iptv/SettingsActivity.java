@@ -320,7 +320,15 @@ public class SettingsActivity extends Activity {
             String name = Playlist.profileName(this, id);
             boolean active = id.equals(Playlist.activeId(this));
             Button button = new Button(this);
-            button.setText(active ? "\u2022 " + name : name);
+            button.setText(name);
+            // The active profile is marked by the view's selected state rather than by a
+            // character in the label: it styles through the same selector as everything else,
+            // it is announced properly, and it does not have to be parsed out again by
+            // anything that reads the screen - including a test.
+            button.setSelected(active);
+            if (active) {
+                button.setContentDescription(name + ", current profile");
+            }
             button.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
