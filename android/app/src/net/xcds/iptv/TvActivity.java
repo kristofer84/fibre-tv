@@ -201,7 +201,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     // and d8 (R8 8.2.2, from build-tools 34) crashes on that with a null-name NPE.
     private Runnable idleHide;
 
-    /** Built in onCreate, installed on the two bars in buildUi. */
+    /**
+     * Built in onCreate, installed on the two bars and on every button in them. The
+     * buttons need it as much as the bars: a Button consumes its own gesture, so the
+     * bar's listener never sees a finger resting on one.
+     */
     private View.OnTouchListener holdChrome;
 
     /** True while a finger is down on the chrome. See holdChrome. */
@@ -454,6 +458,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             }
         });
         audioButton.setOnFocusChangeListener(focusWatcher);
+        // The listener has to be on the BUTTONS, not only on the bars around them: a
+        // Button consumes the gesture itself, so a finger resting on one never reaches
+        // its parent's listener - which is precisely the case this is here to protect,
+        // and the first version of this got it wrong.
+        audioButton.setOnTouchListener(holdChrome);
         subsButton = new Button(this);
         subsButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -462,6 +471,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             }
         });
         subsButton.setOnFocusChangeListener(focusWatcher);
+        subsButton.setOnTouchListener(holdChrome);
         controls.addView(audioButton, controlParams());
         controls.addView(subsButton, controlParams());
 
@@ -480,9 +490,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         barScroll = new HorizontalScrollView(this);
         barScroll.setHorizontalScrollBarEnabled(false);
         barScroll.setFocusable(false);
-        // A finger on either bar holds it open. Returning false is deliberate: the two
-        // scroll views must keep handling their own drags and the buttons their taps, so
-        // this only watches - it never consumes.
+        // A finger on either bar holds it open, and the buttons get the same listener
+        // in buildUi and buildChannelBar. Returning false is deliberate: the scroll views
+        // must keep handling their own drags and the buttons their taps, so this only
+        // watches - it never consumes.
         controlsScroll.setOnTouchListener(holdChrome);
         barScroll.setOnTouchListener(holdChrome);
         barScroll.addView(bar, new FrameLayout.LayoutParams(
@@ -542,6 +553,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 }
             });
             button.setOnFocusChangeListener(focusWatcher);
+            button.setOnTouchListener(holdChrome);
             bar.addView(button, controlParams());
             buttons.add(button);
         }
