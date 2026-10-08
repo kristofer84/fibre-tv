@@ -240,7 +240,21 @@ final class Teletext implements Runnable {
         return carry;
     }
 
-    /** Splits the byte stream into EN 300 472 data units, carrying split ones over. */
+    /**
+     * Splits the byte stream into EN 300 472 data units, carrying split ones over.
+     *
+     * The resynchronisation is the whole point of the framing-code test. A socket
+     * joins in the middle of a PES, so the first bytes it ever sees are the middle
+     * of a data unit, and every PES payload then begins with the 0x10 data
+     * identifier rather than a unit. A walker that trusts its own alignment stays
+     * misaligned for the life of the socket and decodes nothing at all - while the
+     * PAT and PMT keep parsing perfectly, because they do not use this walk. That
+     * failure looks exactly like "the stream carries no pages".
+     *
+     * So a unit is only believed when its id is one of the two teletext ids, its
+     * length is at least a teletext row, and the 0xE4 framing code sits where the
+     * layout says it must. Anything else advances one byte and tries again.
+     */
     private byte[] units(byte[] payload, byte[] carry) {
         byte[] joined = new byte[carry.length + payload.length];
         System.arraycopy(carry, 0, joined, 0, carry.length);
@@ -250,12 +264,15 @@ final class Teletext implements Runnable {
         while (at + 2 <= joined.length) {
             int id = joined[at] & 0xff;
             int unitLength = joined[at + 1] & 0xff;
-            if (unitLength == 0 || at + 2 + unitLength > joined.length) {
-                break;
+            boolean unit = (id == DATA_UNIT_TELETEXT || id == DATA_UNIT_SUBTITLE)
+                    && unitLength >= 44
+                    && at + 2 + unitLength <= joined.length
+                    && (joined[at + 3] & 0xff) == TELETEXT_FRAMING;
+            if (!unit) {
+                at++;                   // resynchronise: the framing code is the anchor
+                continue;
             }
-            if ((id == DATA_UNIT_TELETEXT || id == DATA_UNIT_SUBTITLE) && unitLength >= 44) {
-                decodeUnit(joined, at + 2, id == DATA_UNIT_SUBTITLE);
-            }
+            decodeUnit(joined, at + 2, id == DATA_UNIT_SUBTITLE);
             at += 2 + unitLength;
         }
         byte[] rest = new byte[joined.length - at];
