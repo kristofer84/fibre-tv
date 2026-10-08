@@ -8,6 +8,7 @@ import android.net.wifi.WifiManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -47,6 +48,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private static final long IDLE_HIDE_MS = 4000;
 
     private static final String ASSET = "channels.m3u8";
+
+    private static final String TAG = "iptv";
 
     private LibVLC libVLC;
     private MediaPlayer player;
@@ -321,6 +324,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             case MediaPlayer.Event.Playing:
                 showCard(title());
                 restartIdleTimer();
+                logTracks("playing");
+                break;
+            case MediaPlayer.Event.ESAdded:
+            case MediaPlayer.Event.ESSelected:
+            case MediaPlayer.Event.ESDeleted:
+                Log.i(TAG, "es event=" + event.type + " esType=" + event.getEsChangedType()
+                        + " esId=" + event.getEsChangedID());
+                logTracks("es");
                 break;
             case MediaPlayer.Event.Opening:
                 showCard(title() + "\njoining, please wait");
@@ -341,6 +352,37 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             default:
                 break;
         }
+    }
+
+    // ------------------------------------------------------------------ tracks
+
+    /**
+     * Exploratory: what libVLC actually reports for this transport stream, so the
+     * audio and subtitle labels can be built from real names rather than guessed.
+     * MPEG-TS audio tracks carry no useful name in most builds, in which case they
+     * get labelled by codec instead.
+     */
+    private void logTracks(String when) {
+        Log.i(TAG, when + ": audio current=" + player.getAudioTrack()
+                + " of " + describe(player.getAudioTracks()));
+        Log.i(TAG, when + ": spu   current=" + player.getSpuTrack()
+                + " of " + describe(player.getSpuTracks()));
+        Log.i(TAG, when + ": video current=" + player.getVideoTrack()
+                + " of " + player.getVideoTracksCount() + " " + describe(player.getVideoTracks()));
+    }
+
+    private static String describe(MediaPlayer.TrackDescription[] tracks) {
+        if (tracks == null) {
+            return "null";
+        }
+        StringBuilder out = new StringBuilder("[");
+        for (MediaPlayer.TrackDescription track : tracks) {
+            if (track == null) {
+                continue;
+            }
+            out.append(track.id).append('=').append(track.name).append(' ');
+        }
+        return out.append(']').toString();
     }
 
     // --------------------------------------------------------------- multicast
