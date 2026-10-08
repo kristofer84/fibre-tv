@@ -163,9 +163,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private int readerGeneration;
     private boolean subtitleProbeRunning;
 
-    /** TEMPORARY: whether the sample lines below are on screen. See showSampleSubtitles. */
-    private boolean sampleShown;
-
     // Built in onCreate for the same reason as idleHide below: javac emits no
     // enclosing-method for anonymous classes declared in a field initialiser, and
     // d8 (R8 8.2.2, from build-tools 34) crashes on that with a null-name NPE.
@@ -1008,30 +1005,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     /**
-     * TEMPORARY DIAGNOSTIC. Key 0 toggles two fixed lines through the same view the
-     * reader uses, so the font, the national characters, the size and the position can
-     * be checked while no channel is transmitting subtitle pages. It deliberately does
-     * not touch subsWanted: it is not a subtitle selection, and the state it leaves
-     * behind is "nothing selected".
-     */
-    private void showSampleSubtitles() {
-        if (subtitleView == null) {
-            return;
-        }
-        sampleShown = !sampleShown;
-        if (!sampleShown) {
-            subtitleView.setVisibility(View.GONE);
-            Log.i(TAG, "sample subtitles off (temporary diagnostic)");
-            return;
-        }
-        subtitleView.setText("S\u00e5 naturen kan repa sig, s\u00e4ger \u00c5ke \u00d6rn\n"
-                + "\u00c4r det h\u00e4r Literata? \u00c5\u00c4\u00d6 \u00e5\u00e4\u00f6 "
-                + SUBTITLE_TEXT_SP + "sp");
-        subtitleView.setVisibility(View.VISIBLE);
-        Log.i(TAG, "sample subtitles on (temporary diagnostic)");
-    }
-
-    /**
      * OFF, then each subtitle page this channel offers, then OFF again.
      *
      * Selecting a page is what starts the reader; OFF stops it and hides the
@@ -1204,14 +1177,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             case KeyEvent.KEYCODE_CAPTIONS:
                 // Present on some remotes; toggles subtitles without the bar.
                 cycleSubs();
-                return true;
-
-            case KeyEvent.KEYCODE_0:
-                // TEMPORARY DIAGNOSTIC, requested so the overlay can be looked at
-                // without waiting for a programme that is transmitting subtitles.
-                // Removable: delete this case and showSampleSubtitles().
-                showSampleSubtitles();
-                restartIdleTimer();
                 return true;
 
             case KeyEvent.KEYCODE_BACK:
