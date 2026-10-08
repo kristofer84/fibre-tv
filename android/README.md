@@ -57,7 +57,7 @@ builds on an arm64 host:
 | `d8` | R8 from Google's Maven — a plain jar, so architecture-independent |
 | `javac`, `keytool`, `apksigner` | Java, so architecture-independent |
 
-Two traps are worth knowing about if you bump a version:
+Four traps are worth knowing about if you bump a version:
 
 1. **Compile against API 34, not 35.** Debian's `aapt` is built from Android 14
    sources and cannot read the compact resource entries that API 35's
@@ -73,6 +73,13 @@ Two traps are worth knowing about if you bump a version:
    apk — the activity then cannot load at all, failing with
    `ClassNotFoundException` because its interface `IVLCVout$Callback` does not
    resolve. The build prints a `dex contains:` line to catch this.
+4. **`d8` warns about `androidx.lifecycle.Observer` in libVLC's jar.** Expected, and
+   not worth chasing. It comes from libVLC's `DisplayManager`, a class this app
+   never touches: it attaches video through `IVLCVout.setVideoView`, which avoids
+   `DisplayManager` and therefore its androidx dependency altogether. The class is
+   never loaded, so the missing type is never resolved at runtime. It cannot be
+   pruned out either — libVLC's JNI looks its Java classes up by name, so
+   tree-shaking the jar would break playback.
 
 ### Continuous integration
 
