@@ -112,12 +112,22 @@ final class Sdt {
         return out.toString();
     }
 
+    /**
+     * 12 if this datagram starts with an RTP header, otherwise 0.
+     *
+     * The mask matters: RTP version 2 sets the top two bits, so the first byte is
+     * 0x80, which as a SIGNED Java byte is -128. "data[0] >> 6 == 2" therefore
+     * never matches - it evaluates to -2 - and the header was never skipped, so the
+     * scan ran at the wrong offsets and found almost nothing. The same expression
+     * is correct in Python, where a byte is unsigned, which is where it came from.
+     */
+    private static int rtpHeaderLength(byte[] data, int length) {
+        return (length > 12 && (data[0] & 0xc0) == 0x80) ? 12 : 0;
+    }
+
     /** {transport packets, SDT packets} present in one datagram. */
     private static int[] countPackets(byte[] data, int length) {
-        int offset = 0;
-        if (length > 12 && (data[0] >> 6) == 2) {
-            offset = 12;
-        }
+        int offset = rtpHeaderLength(data, length);
         int ts = 0;
         int sdt = 0;
         for (int i = offset; i + TS_PACKET <= length; i += TS_PACKET) {
@@ -135,10 +145,7 @@ final class Sdt {
 
     /** A datagram is an RTP header followed by whole transport packets. */
     private static String parseDatagram(byte[] data, int length) {
-        int offset = 0;
-        if (length > 12 && (data[0] >> 6) == 2) {
-            offset = 12;                    // RTP version 2: the payload is MPEG-TS
-        }
+        int offset = rtpHeaderLength(data, length);
         for (int i = offset; i + TS_PACKET <= length; i += TS_PACKET) {
             if ((data[i] & 0xff) != TS_SYNC) {
                 continue;
