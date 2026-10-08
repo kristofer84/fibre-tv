@@ -1025,7 +1025,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return;
         }
         subtitleView.setText("S\u00e5 naturen kan repa sig, s\u00e4ger \u00c5ke \u00d6rn\n"
-                + "\u00c4r det h\u00e4r Literata? \u00c5\u00c4\u00d6 \u00e5\u00e4\u00f6 30sp");
+                + "\u00c4r det h\u00e4r Literata? \u00c5\u00c4\u00d6 \u00e5\u00e4\u00f6 "
+                + SUBTITLE_TEXT_SP + "sp");
         subtitleView.setVisibility(View.VISIBLE);
         Log.i(TAG, "sample subtitles on (temporary diagnostic)");
     }
