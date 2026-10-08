@@ -13,7 +13,10 @@
     <!-- The two flat states. Unfocused is a translucent dark pill rather than a boxed
          button: that contrast against the filled focused state is what reads as a TV menu. -->
     <color name="pill_normal">#66000000</color>
-    <color name="pill_playing">#38FFFFFF</color>
+    <!-- The active marker - the playing channel, the current profile - as an accent-tinted chip,
+         which is a state rather than a character in a label. -->
+    <color name="accent_soft">#33F2F2F2</color>
+    <color name="pill_playing">#33F2F2F2</color>
 
     <!-- The scrim behind the chrome, so the rows sit on the picture instead of in a panel. -->
     <color name="scrim_top">#00000000</color>

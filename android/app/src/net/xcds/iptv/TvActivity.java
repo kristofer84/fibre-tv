@@ -20,6 +20,7 @@ import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
@@ -131,7 +132,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private HorizontalScrollView barScroll;
     private LinearLayout bar;
     private LinearLayout controls;
+    private FrameLayout root;
     private LinearLayout bottom;
+    /** The settings overlay, or null when it is not up. See openSettings. */
+    private View settingsOverlay;
+    private SettingsPanel settingsPanel;
     private HorizontalScrollView controlsScroll;
     /** Bumped on every show and hide so a finishing fade cannot hide a freshly shown bar. */
     private int chromeGeneration;
@@ -216,14 +221,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      *  times it will re-tune before saying so instead of looping. */
     private static final long WATCHDOG_TICK_MS = 2000;
 
-    /**
-     * TEMPORARY: with this true the watchdog logs every candidate liveness signal on each tick
-     * and never re-tunes, so the signal can be chosen from measurements on the device rather
-     * than from what the API looks like it should do. The first attempt used getTime(), which
-     * reports 0 for a live multicast, and the second used the media stats, which froze while the
-     * picture was fine. Remove this and the diagnostic log once the signal is settled.
-     */
-    private static final boolean WATCHDOG_DRY_RUN = true;
+    /** How long the input has to stand still before the watchdog re-tunes. */
     private static final long STALL_LIMIT_MS = 10000;
     private static final int STALL_MAX_RETRIES = 3;
 
@@ -279,6 +277,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // For phones, where the settings overlay has fields and a keyboard: the panel should be
+        // resized rather than covered. No effect on a television, which has no soft keyboard.
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
 
         idleHide = new Runnable() {
             @Override
@@ -460,7 +461,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         if (player == null || vout == null) {
             return;
         }
-        // Stop rather than pause: this is what drops the multicast membership.
+        // Stop rather than pause: this is what drops the multicast membership. Logged because this
+        // property - leaving the app really does leave the group - matters more than any overlay,
+        // and a line in the log is what makes it checkable.
+        Log.i(TAG, "onStop: stopping the player, which drops the group membership");
         player.stop();
         // ...and the same for the teletext reader, which joins the same group.
         stopReader();
@@ -492,7 +496,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     // ------------------------------------------------------------------ the UI
 
     private void buildUi() {
-        FrameLayout root = new FrameLayout(this);
+        root = new FrameLayout(this);
         root.setBackgroundColor(Color.BLACK);
 
         surface = new SurfaceView(this);
@@ -605,7 +609,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 // The player stops while Settings is open, because onStop drops the group
                 // membership, and tunes again on the way back - which is also when an
                 // edited list is picked up. See reloadPlaylist.
-                startActivity(new Intent(TvActivity.this, SettingsActivity.class));
+                openSettings();
             }
         });
         stylePill(settingsButton, R.drawable.ic_settings);
@@ -1447,6 +1451,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (settingsOverlay != null) {
+            // The panel has the viewer's attention: the player must not tune or change track behind
+            // it. Back closes the overlay; everything else belongs to whatever has focus inside.
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                closeSettingsOverlay();
+                return true;
+            }
+            return super.onKeyDown(keyCode, event);
+        }
         switch (keyCode) {
             case KeyEvent.KEYCODE_CHANNEL_UP:
             case KeyEvent.KEYCODE_MEDIA_NEXT:
@@ -1545,6 +1558,78 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     // ------------------------------------------------------------------ utils
 
     /**
+     * Settings, as an overlay over the playing picture and hosted by this activity.
+     *
+     * Hosting it here is the point rather than a convenience: a separate activity would run this
+     * activity's onStop, which stops playback and drops the multicast membership - the invariant that
+     * keeps a forgotten stream off the LAN. Nothing about this activity's lifecycle changes, so the
+     * stream, the membership and the teletext reader all keep running while the list is edited.
+     *
+     * The standalone SettingsActivity stays for a playlist so broken that nothing plays, and for
+     * phones; both hosts build the same panel.
+     */
+    private void openSettings() {
+        if (settingsOverlay != null) {
+            return;
+        }
+        if (player == null) {
+            // Nothing is playing to overlay: the activity is the right host in that state.
+            startActivity(new Intent(this, SettingsActivity.class));
+            return;
+        }
+        settingsPanel = new SettingsPanel(this, new SettingsPanel.Host() {
+            @Override
+            public void settingsChanged() {
+                // Apply what can be applied live, and pick up a new list if there is one. No stop,
+                // no re-tune unless the list itself changed - which is the whole point.
+                applyAudioDelay(0);
+                applyAudioTrim();
+                if (Playlist.revision(TvActivity.this) != loadedRevision) {
+                    reloadPlaylist();
+                    tune(current);
+                }
+            }
+
+            @Override
+            public void closeSettings() {
+                closeSettingsOverlay();
+            }
+        });
+
+        FrameLayout overlay = new FrameLayout(this);
+        // Dimmed rather than opaque: the picture staying visible is the point of an overlay.
+        overlay.setBackgroundColor(0xB0000000);
+        overlay.setFocusable(true);
+        overlay.addView(settingsPanel.build(), new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        settingsOverlay = overlay;
+        root.addView(overlay, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT));
+        hideChrome();
+        settingsPanel.refresh();
+        overlay.requestFocus();
+        Log.i(TAG, "settings: overlay opened - the player keeps running behind it");
+    }
+
+    private void closeSettingsOverlay() {
+        if (settingsOverlay == null) {
+            return;
+        }
+        root.removeView(settingsOverlay);
+        settingsOverlay = null;
+        settingsPanel = null;
+        surface.requestFocus();
+        InputMethodManager keyboard =
+                (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (keyboard != null) {
+            keyboard.hideSoftInputFromWindow(surface.getWindowToken(), 0);
+        }
+        Log.i(TAG, "settings: overlay closed - the player never stopped");
+    }
+
+    /**
      * libVLC takes MICROSECONDS and a person types milliseconds, so the conversion happens here
      * and nowhere else. A wrong unit here is a silent thousandfold error, and the settings
      * screen stores milliseconds precisely so that this is the only line that has to know.
@@ -1624,7 +1709,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     /**
      * One watchdog check: has anything actually moved?
      *
-     * The signal is libVLC's own counters rather than the running time. getTime() returns 0 for
+     * The signal is Android's own received-bytes counter rather than the running time: getTime()
+     * returns 0 for
      * a live multicast and keeps returning 0, which this discovered on the device - the first
      * version was written against it and would never have fired for the case it exists for.
      * demuxReadBytes counts what the demuxer has pulled off the network and displayedPictures

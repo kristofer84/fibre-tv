@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Field text follows the surface under it, the same way the chrome's buttons do: dark on the
+     accent pill when focused or pressed, accent on the tinted chip when selected, and the chrome's
+     own light grey the rest of the time. Without this a focused field was white on a near-white
+     pill, which read as an empty control. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:color="@color/chrome_text_focused"/>
+    <item android:state_pressed="true" android:color="@color/chrome_text_focused"/>
+    <item android:state_selected="true" android:color="@color/accent"/>
+    <item android:color="@color/chrome_text"/>
+</selector>

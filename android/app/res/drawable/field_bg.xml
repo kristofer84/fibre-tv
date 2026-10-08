@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A text field that reads as text until it is in use: nothing at rest, the accent pill when
+     focused or touched, and the same accent-tinted chip when selected. Seven channels of boxed
+     input read as a form; seven channels of text read as a list, and the highlight says which one
+     is being edited. Pressed matters for touch, where a tap does not always leave focus behind. -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_focused="true" android:drawable="@drawable/pill_focused"/>
+    <item android:state_pressed="true" android:drawable="@drawable/pill_focused"/>
+    <item android:state_selected="true" android:drawable="@drawable/pill_playing"/>
+    <item android:drawable="@android:color/transparent"/>
+</selector>
