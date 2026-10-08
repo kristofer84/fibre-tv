@@ -84,6 +84,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private int spuWanted;
     private boolean applyWanted;
 
+    /** Set once Playing has fired for the current tuning, cleared on every retune. */
+    private boolean started;
+
     private WifiManager.MulticastLock multicastLock;
     private WifiManager.WifiLock wifiLock;
 
@@ -380,6 +383,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         showCard(title() + "\njoining " + channel.group() + ", please wait");
         updateBar();
         applyWanted = true;
+        started = false;
         updateTrackButtons();
 
         Media media = new Media(libVLC, Uri.parse(channel.url));
@@ -402,6 +406,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private void onPlayerEvent(MediaPlayer.Event event) {
         switch (event.type) {
             case MediaPlayer.Event.Playing:
+                started = true;
                 showCard(title());
                 restartIdleTimer();
                 onTracksAvailable("playing");
@@ -410,7 +415,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 showCard(title() + "\njoining, please wait");
                 break;
             case MediaPlayer.Event.Buffering:
-                showCard(title() + "\nbuffering");
+                // libVLC fires this repeatedly, including at 100% during ordinary
+                // playback, so it is only worth showing before the stream starts.
+                // Shown unconditionally it pins the card to "buffering" forever,
+                // because each event re-shows it and nothing hides it again.
+                if (!started) {
+                    showCard(title() + "\nbuffering");
+                }
                 break;
             case MediaPlayer.Event.EncounteredError:
                 // Most likely the group is not being delivered: no IGMP proxy, a
