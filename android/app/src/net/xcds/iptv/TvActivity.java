@@ -451,6 +451,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         updateBar();
         applyWanted = true;
         started = false;
+        // Subtitles start off on every channel. The audio choice is remembered,
+        // because AC-3 is a preference; a subtitle page is something you turn on
+        // for one programme, and carrying it to the next channel is just wrong.
+        spuWanted = 0;
         updateTrackButtons();
 
         Media media = new Media(libVLC, Uri.parse(channel.url));
@@ -553,18 +557,33 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         return withoutDisable(player.getAudioTracks());
     }
 
-    /** Subtitle tracks including "Disable", which is what "off" means here. */
+    /**
+     * Subtitle tracks including "Disable", which is what "off" means here.
+     *
+     * The raw teletext entry is excluded: selecting it draws a whole teletext page
+     * over the picture, which is not something a button marked Subs should do, and
+     * it is also easy to leave on with no obvious way back. The subtitle pages are
+     * the entries libVLC names "Teletext subtitles". If a channel offers none, the
+     * full list is used rather than leaving the button with nothing to do.
+     */
     private List<MediaPlayer.TrackDescription> spuTracks() {
-        List<MediaPlayer.TrackDescription> out = new ArrayList<>();
+        List<MediaPlayer.TrackDescription> all = new ArrayList<>();
         MediaPlayer.TrackDescription[] tracks = player.getSpuTracks();
         if (tracks != null) {
             for (MediaPlayer.TrackDescription track : tracks) {
                 if (track != null) {
-                    out.add(track);
+                    all.add(track);
                 }
             }
         }
-        return out;
+        List<MediaPlayer.TrackDescription> pages = new ArrayList<>();
+        for (MediaPlayer.TrackDescription track : all) {
+            if (track.id < 0 || (track.name != null
+                    && track.name.toLowerCase(Locale.ROOT).contains("subtitle"))) {
+                pages.add(track);
+            }
+        }
+        return pages.size() > 1 ? pages : all;
     }
 
     private static List<MediaPlayer.TrackDescription> withoutDisable(
@@ -957,6 +976,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 // Reached only while the bar is hidden (a focused button eats
                 // these first), so use them to bring it up.
                 showChromeFocused();
+                return true;
+
+            case KeyEvent.KEYCODE_CAPTIONS:
+                // Present on some remotes; toggles subtitles without the bar.
+                cycleSubs();
                 return true;
 
             case KeyEvent.KEYCODE_BACK:
