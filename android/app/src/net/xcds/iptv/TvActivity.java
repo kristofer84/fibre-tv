@@ -677,6 +677,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return;                     // nothing parsed yet
         }
 
+        // Turn libVLC's own subtitle rendering off rather than merely not choosing a
+        // track: left alone it auto-selects one, and its teletext renderer then draws
+        // the grid as well as our overlay - two sets of subtitles, one of them the
+        // upscaled bitmap this whole rework exists to get rid of.
+        if (player.getSpuTrack() != -1) {
+            player.setSpuTrack(-1);
+            Log.i(TAG, "spu off: libVLC's teletext renderer is not used");
+        }
+
         if (applyWanted) {
             applyWanted = false;
             if (audioWanted > 0) {

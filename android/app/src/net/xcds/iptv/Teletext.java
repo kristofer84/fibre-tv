@@ -323,21 +323,27 @@ final class Teletext implements Runnable {
             return;
         }
         int number = (tens & 0x0f) * 10 + (units & 0x0f);
-        if (page.number != number) {
-            return;
-        }
         synchronized (rows) {
-            boolean first = assembling != page.full();
-            if (!first) {
+            // A header for ANY page in this magazine ends whatever was being
+            // assembled. Rows belong to the header that introduced them, and this
+            // stream interleaves the pages of a magazine - so without this the rows
+            // of every page that followed the subtitle page were collected into it,
+            // and a subtitle page came out as the news index with the odd stray
+            // comma row.
+            boolean following = assembling == page.full();
+            if (following) {
                 publish(page);                      // the previous subtitle
             }
             java.util.Arrays.fill(rows, null);
-            assembling = page.full();
-            if (first) {
-                // One line per page cycle, and the only deterministic way to tell
-                // "this programme has no subtitles running" from "the overlay is
-                // broken": the header arrived, and the text rows are what follow it.
-                Log.i(TAG, "teletext: page " + page.full() + " header");
+            if (number == page.number) {
+                assembling = page.full();
+                if (!following) {
+                    // Once per run of this page, which is the deterministic answer to
+                    // "is the subtitle page being transmitted at all".
+                    Log.i(TAG, "teletext: page " + page.full() + " header");
+                }
+            } else {
+                assembling = -1;                    // not our page: ignore its rows
             }
         }
     }
