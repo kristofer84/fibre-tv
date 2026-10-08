@@ -288,8 +288,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 // tapped in touch mode is clicked without ever being focused, so the
                 // focus test below cannot see it, and the bar would otherwise hide
                 // from under the finger using it.
-                if (touching || barScroll.hasFocus() || bar.hasFocus()
-                        || controlsScroll.hasFocus() || controls.hasFocus()) {
+                  // The panel counts as in use for the same reason a resting finger does: it holds
+                  // the remote, so the chrome hiding underneath it is no reason to take the remote back.
+                  if (settingsOverlay != null || touching || barScroll.hasFocus() || bar.hasFocus()
+                          || controlsScroll.hasFocus() || controls.hasFocus()) {
                     return;                 // in use; hiding it would kill the D-pad
                 }
                 hideChrome();
@@ -846,6 +848,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
 
     private void hideChrome() {
         ui.removeCallbacks(idleHide);
+        if (settingsOverlay != null) {
+            // A settings panel is open over the chrome. Hiding the chrome is fine; taking focus back
+            // to the surface is not, because the panel would still be on screen and would silently
+            // stop answering the remote. It keeps focus until it is closed.
+            return;
+        }
         if (!chromeVisible()) {
             // The idle timer can fire long after something else hid the bar, and a
             // second "hidden" line would make this log useless for timing anything.
@@ -1596,6 +1604,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             }
         });
 
+        // Before the overlay exists: hideChrome() moves focus to the surface, and the guard above
+        // must not mistake this first hide for a timer firing under an open panel.
+        hideChrome();
+
         FrameLayout overlay = new FrameLayout(this);
         // Dimmed rather than opaque: the picture staying visible is the point of an overlay.
         overlay.setBackgroundColor(0xB0000000);
@@ -1607,9 +1619,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         root.addView(overlay, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
-        hideChrome();
         settingsPanel.refresh();
-        overlay.requestFocus();
+        // The panel takes focus on its first control rather than as a container: see focusFirst.
+        settingsPanel.focusFirst();
         Log.i(TAG, "settings: overlay opened - the player keeps running behind it");
     }
 

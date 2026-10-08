@@ -66,6 +66,8 @@ final class SettingsPanel {
     private final Host callback;
 
     private LinearLayout rows;
+    /** The control the D-pad should start on. See focusFirst. */
+    private View firstControl;
     private LinearLayout profileRow;
     private EditText profileNameField;
     private TextView status;
@@ -427,6 +429,9 @@ final class SettingsPanel {
                     say("switched to " + Playlist.activeName(host));
                 }
             });
+            if (active || firstControl == null) {
+                firstControl = chip;
+            }
             chip.setSelected(active);
             if (active) {
                 chip.setContentDescription(name + ", current profile");
@@ -451,6 +456,18 @@ final class SettingsPanel {
             }
         });
         profileRow.addView(deleteButton);
+    }
+
+    /**
+     * Put the D-pad on the first control, not on the panel itself. Focusing the container looks
+     * the same in a screenshot and behaves differently on a remote: its focus rectangle is the whole
+     * screen, so the first Down is a focus search from an impossible position and lands on whatever
+     * FocusFinder picks - on the device that was a Remove button at the bottom of the list.
+     */
+    void focusFirst() {
+        if (firstControl != null) {
+            firstControl.requestFocus();
+        }
     }
 
     private void say(String message) {
