@@ -14,6 +14,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.SurfaceView;
 import android.view.View;
 import android.view.WindowManager;
@@ -200,6 +201,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     // and d8 (R8 8.2.2, from build-tools 34) crashes on that with a null-name NPE.
     private Runnable idleHide;
 
+    /** Built in onCreate, installed on the two bars in buildUi. */
+    private View.OnTouchListener holdChrome;
+
+    /** True while a finger is down on the chrome. See holdChrome. */
+    private boolean touching;
+
     // ---------------------------------------------------------------- lifecycle
 
     @Override
@@ -210,7 +217,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         idleHide = new Runnable() {
             @Override
             public void run() {
-                if (barScroll.hasFocus() || bar.hasFocus()
+                // A finger on the bar counts as "in use" just as focus does: a Button
+                // tapped in touch mode is clicked without ever being focused, so the
+                // focus test below cannot see it, and the bar would otherwise hide
+                // from under the finger using it.
+                if (touching || barScroll.hasFocus() || bar.hasFocus()
                         || controlsScroll.hasFocus() || controls.hasFocus()) {
                     return;                 // in use; hiding it would kill the D-pad
                 }
@@ -233,6 +244,26 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                         showSubtitles(copy);
                     }
                 });
+            }
+        };
+
+        holdChrome = new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        touching = true;
+                        restartIdleTimer();
+                        break;
+                    case MotionEvent.ACTION_UP:
+                    case MotionEvent.ACTION_CANCEL:
+                        touching = false;
+                        restartIdleTimer();
+                        break;
+                    default:
+                        break;
+                }
+                return false;           // never consume: the buttons and scrolling need this
             }
         };
 
@@ -343,6 +374,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         surface = new SurfaceView(this);
         surface.setFocusable(true);
         surface.setFocusableInTouchMode(true);
+        tapTogglesChrome(surface);
         root.addView(surface, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
@@ -363,6 +395,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         subtitlesSurface = new SurfaceView(this);
         subtitlesSurface.setZOrderMediaOverlay(true);
         subtitlesSurface.getHolder().setFormat(PixelFormat.TRANSLUCENT);
+        // The subtitles layer covers the whole screen and sits above the video, so a tap
+        // on the picture lands here rather than on the surface below it.
+        tapTogglesChrome(subtitlesSurface);
         root.addView(subtitlesSurface, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
@@ -445,6 +480,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         barScroll = new HorizontalScrollView(this);
         barScroll.setHorizontalScrollBarEnabled(false);
         barScroll.setFocusable(false);
+        // A finger on either bar holds it open. Returning false is deliberate: the two
+        // scroll views must keep handling their own drags and the buttons their taps, so
+        // this only watches - it never consumes.
+        controlsScroll.setOnTouchListener(holdChrome);
+        barScroll.setOnTouchListener(holdChrome);
         barScroll.addView(bar, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
@@ -495,6 +535,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 @Override
                 public void onClick(View v) {
                     tune(index);
+                    // A tapped button is not a focused one, so the focus listener above
+                    // never runs for touch: without this the bar would disappear four
+                    // seconds after the tap that used it.
+                    restartIdleTimer();
                 }
             });
             button.setOnFocusChangeListener(focusWatcher);
@@ -549,6 +593,41 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 });
             }
         }, "sdt-" + (index + 1)).start();
+    }
+
+    /**
+     * A tap on the picture shows or hides the chrome, which is the whole of what a touch
+     * device needs: without it there is no way to reach the buttons at all, and the rest
+     * of the app is already phone-friendly.
+     *
+     * An OnTouchListener rather than an OnClickListener, deliberately. A click listener
+     * makes the view clickable, and a clickable view that has focus consumes
+     * DPAD_CENTER itself - so the remote path, which is verified and in daily use, would
+     * quietly change behaviour. Touch events reach an OnTouchListener without that.
+     */
+    private void tapTogglesChrome(View view) {
+        view.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                if (event.getActionMasked() == MotionEvent.ACTION_UP) {
+                    toggleChrome();
+                }
+                return true;            // the picture owns the gesture
+            }
+        });
+    }
+
+    /**
+     * Show or hide the chrome from a touch. showChrome rather than showChromeFocused: a
+     * finger aims at the button it wants, so moving focus as well would only add a
+     * highlight nobody asked for.
+     */
+    private void toggleChrome() {
+        if (chromeVisible()) {
+            hideChrome();
+        } else {
+            showChrome();
+        }
     }
 
     private void showChrome() {

@@ -13,7 +13,12 @@
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34"/>
 
-    <uses-feature android:name="android.software.leanback" android:required="true"/>
+    <!-- leanback is no longer required, so the same apk can be installed on a phone or
+         tablet from Play as well as side-loaded. A TV still installs it: the launcher
+         filter below gives it LEANBACK_LAUNCHER, and touchscreen is not required, so
+         neither a TV nor a phone is excluded. The app is usable on both now that the
+         picture can be tapped to reach the controls. -->
+    <uses-feature android:name="android.software.leanback" android:required="false"/>
     <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
 
     <application
