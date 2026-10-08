@@ -672,18 +672,24 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * as well would draw libVLC's teletext bitmap underneath our own text.
      */
     private void onTracksAvailable(String when) {
-        List<MediaPlayer.TrackDescription> audio = audioTracks();
-        if (audio.isEmpty()) {
-            return;                     // nothing parsed yet
-        }
-
         // Turn libVLC's own subtitle rendering off rather than merely not choosing a
         // track: left alone it auto-selects one, and its teletext renderer then draws
         // the grid as well as our overlay - two sets of subtitles, one of them the
         // upscaled bitmap this whole rework exists to get rid of.
+        //
+        // Done before the audio check below, because this method is called on every
+        // ES event and the first of those arrives before the audio list is parsed.
+        // Disabling only once the audio is known left a window in which libVLC could
+        // pick a subtitle track, which is exactly what put its own text on screen
+        // under ours.
         if (player.getSpuTrack() != -1) {
             player.setSpuTrack(-1);
             Log.i(TAG, "spu off: libVLC's teletext renderer is not used");
+        }
+
+        List<MediaPlayer.TrackDescription> audio = audioTracks();
+        if (audio.isEmpty()) {
+            return;                     // nothing parsed yet
         }
 
         if (applyWanted) {
