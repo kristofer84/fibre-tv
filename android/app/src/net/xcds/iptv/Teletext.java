@@ -310,11 +310,18 @@ final class Teletext implements Runnable {
             return;
         }
         synchronized (rows) {
-            if (assembling == page.full()) {
+            boolean first = assembling != page.full();
+            if (!first) {
                 publish(page);                      // the previous subtitle
             }
             java.util.Arrays.fill(rows, null);
             assembling = page.full();
+            if (first) {
+                // One line per page cycle, and the only deterministic way to tell
+                // "this programme has no subtitles running" from "the overlay is
+                // broken": the header arrived, and the text rows are what follow it.
+                Log.i(TAG, "teletext: page " + page.full() + " header");
+            }
         }
     }
 
