@@ -212,8 +212,42 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     /** Set once Playing has fired for the current tuning, cleared on every retune. */
     private boolean started;
 
+    /** Watchdog: how often progress is checked, how long a stall has to last, and how many
+     *  times it will re-tune before saying so instead of looping. */
+    private static final long WATCHDOG_TICK_MS = 2000;
+
+    /**
+     * TEMPORARY: with this true the watchdog logs every candidate liveness signal on each tick
+     * and never re-tunes, so the signal can be chosen from measurements on the device rather
+     * than from what the API looks like it should do. The first attempt used getTime(), which
+     * reports 0 for a live multicast, and the second used the media stats, which froze while the
+     * picture was fine. Remove this and the diagnostic log once the signal is settled.
+     */
+    private static final boolean WATCHDOG_DRY_RUN = true;
+    private static final long STALL_LIMIT_MS = 10000;
+    private static final int STALL_MAX_RETRIES = 3;
+
     /** How long a typed channel number waits for another digit before it is tuned. */
     private static final long DIGIT_TIMEOUT_MS = 1500;
+
+    /** libVLC's own volume, captured once, used as the 100% baseline for the per-track trims. */
+    private int defaultVolume;
+
+    /** What the last applied trim was, so identical ES events do not repeat it. */
+    private int lastAppliedVolume = -1;
+    private String lastAppliedLabel = "";
+
+    /**
+     * Watchdog state. Progress is libVLC's own demuxer counters, not the running time:
+     * getTime() reports 0 and keeps reporting 0 for a live multicast, which the first version
+     * of this found on the device. lastProgress <= 0 means nothing has been read yet.
+     */
+    private Runnable watchdog;
+    private long lastProgress;
+    private long lastProgressAt;
+    private int stallRetries;
+    private boolean watchdogLoggedNotArmed;
+    private boolean watchdogLoggedArmed;
 
     /** Digits typed so far, tuned when they stop arriving. See digitTyped. */
     private final StringBuilder typing = new StringBuilder();
@@ -306,6 +340,21 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                     showCard(title() + "\nno channel " + typed
                             + " (the list has " + channels.size() + ")");
                     restartIdleTimer();
+                }
+            }
+        };
+
+        // A freeze is otherwise unrecoverable: a WiFi hiccup or an operator re-mux leaves the
+        // picture stopped with nothing to notice it. This watches libVLC's own running time and
+        // re-tunes, which rejoins cleanly. It stays disarmed until the player reports a
+        // non-zero time, so a stream that never reports one degrades to no watchdog rather than
+        // to a re-tune loop.
+        watchdog = new Runnable() {
+            @Override
+            public void run() {
+                watchdogTick();
+                if (player != null && started) {
+                    ui.postDelayed(watchdog, WATCHDOG_TICK_MS);
                 }
             }
         };
@@ -415,6 +464,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         player.stop();
         // ...and the same for the teletext reader, which joins the same group.
         stopReader();
+        ui.removeCallbacks(watchdog);
         if (vout.areViewsAttached()) {
             vout.detachViews();
         }
@@ -876,6 +926,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         // and the reader is joined to the group of the channel it was started for.
         // The pages this channel offers are looked up in the background so the
         // button can name them when it is pressed.
+        lastProgress = 0;
+        lastProgressAt = System.currentTimeMillis();
+        stallRetries = 0;
+        watchdogLoggedArmed = false;
+        watchdogLoggedNotArmed = false;
+        ui.removeCallbacks(watchdog);
         subsWanted = 0;
         stopReader();
         showSubtitles(Collections.<String>emptyList());
@@ -922,6 +978,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 showCard(title());
                 restartIdleTimer();
                 onTracksAvailable("playing");
+                applyAudioDelay(0);
+                applyAudioTrim();
+                lastProgressAt = System.currentTimeMillis();
+                ui.removeCallbacks(watchdog);
+                ui.postDelayed(watchdog, WATCHDOG_TICK_MS);
                 break;
             case MediaPlayer.Event.Opening:
                 showCard(title() + "\njoining, please wait");
@@ -936,6 +997,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 }
                 break;
             case MediaPlayer.Event.EncounteredError:
+                ui.removeCallbacks(watchdog);          // nothing to watch; the card says it
                 // Most likely the group is not being delivered: no IGMP proxy, a
                 // re-organised line, or a WiFi link that dropped the membership.
                 showCard(title() + "\ncannot join " + channels.get(current).group()
@@ -993,6 +1055,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 Log.i(TAG, "applied audio ordinal " + audioWanted);
             }
         }
+        applyAudioTrim();
 
         updateTrackButtons();
     }
@@ -1023,6 +1086,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         audioWanted = (audioWanted + 1) % audio.size();
         player.setAudioTrack(audio.get(audioWanted).id);
         Log.i(TAG, "audio -> ordinal " + audioWanted + " id " + audio.get(audioWanted).id);
+        applyAudioTrim();
         updateTrackButtons();
         restartIdleTimer();
     }
@@ -1479,6 +1543,181 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     // ------------------------------------------------------------------ utils
+
+    /**
+     * libVLC takes MICROSECONDS and a person types milliseconds, so the conversion happens here
+     * and nowhere else. A wrong unit here is a silent thousandfold error, and the settings
+     * screen stores milliseconds precisely so that this is the only line that has to know.
+     *
+     * The retry exists because the audio output may not be up at the instant Playing fires;
+     * one retry half a second later is enough, and both attempts are logged.
+     */
+    private void applyAudioDelay(final int attempt) {
+        long micros = AudioTuning.delayMs(this) * 1000L;
+        boolean ok = player.setAudioDelay(micros);
+        Log.i(TAG, "audio delay " + (micros / 1000) + " ms -> " + micros + " us (attempt "
+                + (attempt + 1) + ", libVLC says " + ok + ", reads back "
+                + player.getAudioDelay() + " us)");
+        if (!ok && attempt == 0) {
+            ui.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    if (player != null && started) {
+                        applyAudioDelay(attempt + 1);
+                    }
+                }
+            }, 500);
+        }
+    }
+
+    /**
+     * The trim is a percentage of libVLC's own volume, captured once per process before any
+     * trim is applied. That avoids depending on a volume scale the API we have does not
+     * document, and it means setting a trim back to 100 lands exactly where it started rather
+     * than drifting by whatever was applied last.
+     */
+    private void applyAudioTrim() {
+        int volume = player.getVolume();
+        String label0 = null;
+        if (defaultVolume <= 0 && volume > 0) {
+            defaultVolume = volume;
+            Log.i(TAG, "audio: libVLC's own volume is " + volume + ", taken as the 100% baseline");
+        }
+        if (defaultVolume <= 0) {
+            return;                     // audio not up yet; the next selection tries again
+        }
+        // Keyed on the track's order, not its codec name: the media track table lists only the
+        // first audio ES for these streams, so the AC-3 has no name to look up - measured, not
+        // assumed, see AudioTuning.
+        int ordinal = selectedAudioOrdinal();
+        int percent = AudioTuning.trim(this, AudioTuning.bucket(ordinal));
+        int wanted = AudioTuning.clamp(
+                Math.round(defaultVolume * percent / 100f), 0, defaultVolume * 2);
+        // Only when it changes: this is called on every ES event, and the counters show seven
+        // of those per tuning, so acting and logging every time is seven identical lines.
+        String bucket = AudioTuning.bucket(ordinal);
+        if (wanted == lastAppliedVolume && bucket.equals(lastAppliedLabel)) {
+            return;
+        }
+        lastAppliedVolume = wanted;
+        lastAppliedLabel = bucket;
+        player.setVolume(wanted);
+        Log.i(TAG, "audio trim " + lastAppliedLabel + " " + percent + "% -> volume "
+                + wanted + " of a baseline " + defaultVolume);
+    }
+
+    /** Which audio track is playing, as an ordinal, which is what the label lookup wants. */
+    private int selectedAudioOrdinal() {
+        if (player == null) {
+            return 0;
+        }
+        List<MediaPlayer.TrackDescription> audio = audioTracks();
+        int id = player.getAudioTrack();
+        for (int i = 0; i < audio.size(); i++) {
+            if (audio.get(i).id == id) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * One watchdog check: has anything actually moved?
+     *
+     * The signal is libVLC's own counters rather than the running time. getTime() returns 0 for
+     * a live multicast and keeps returning 0, which this discovered on the device - the first
+     * version was written against it and would never have fired for the case it exists for.
+     * demuxReadBytes counts what the demuxer has pulled off the network and displayedPictures
+     * counts what reached the screen, so bytes arriving but nothing decoding is also a stall.
+     *
+     * It stays unarmed until something has moved at least once, so a stream that never reports
+     * stats degrades to no watchdog instead of a re-tune loop. Every trip and every recovery is
+     * logged: a watchdog that retries silently is indistinguishable from a stream that never
+     * broke.
+     */
+    private void watchdogTick() {
+        if (player == null || !started) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        // Re-check the trim here as well as on track selection: the media track table, which is
+        // where the codec label comes from, is not populated at the instant a track is switched,
+        // so the first attempt can fall back to "Other" and never be corrected - which is what
+        // the device showed. This is a no-op unless the label or the trim has changed.
+        applyAudioTrim();
+        IMedia media = player.getMedia();
+        IMedia.Stats stats = media == null ? null : media.getStats();
+        // The signal is Android's own per-uid receive counter, chosen by measurement:
+        //   getTime()  - reports 0 for a live multicast and keeps reporting 0
+        //   position   - 0.0, for the same reason
+        //   media stats- frozen at one value while the picture was perfect
+        //   /proc/net/dev - not readable by an app, returns -1
+        //   TrafficStats.getUidRxBytes - advances at the stream's own rate, ~12.4 Mbit/s here
+        // It counts the app's whole network use, which for this app is the stream and its
+        // probes, so a stalled input stops it. What it cannot see is bytes still arriving while
+        // nothing decodes - an operator re-mux, where libVLC reports no picture counters at all
+        // (displayedPictures stayed 0 even while playing). That limit is documented rather than
+        // papered over.
+        long progress = uidRxBytes();
+        if (progress != lastProgress) {
+            if (lastProgress > 0 && stallRetries > 0) {
+                Log.i(TAG, "watchdog: traffic moving again (uidRx=" + progress + ")");
+            }
+            if (!watchdogLoggedArmed) {
+                watchdogLoggedArmed = true;
+                Log.i(TAG, "watchdog: armed, watching the network counters");
+            }
+            lastProgress = progress;
+            lastProgressAt = now;
+            stallRetries = 0;
+            return;
+        }
+        if (lastProgress <= 0) {
+            if (!watchdogLoggedNotArmed) {
+                watchdogLoggedNotArmed = true;
+                Log.i(TAG, "watchdog: no traffic yet, so it is not armed for this tuning");
+            }
+            lastProgressAt = now;
+            return;
+        }
+        if (now - lastProgressAt < STALL_LIMIT_MS) {
+            return;
+        }
+        stallRetries++;
+        if (stallRetries > STALL_MAX_RETRIES) {
+            Log.i(TAG, "watchdog: still no traffic after " + STALL_MAX_RETRIES + " re-tunes (uidRx="
+                    + progress + "), stopping; press the channel number");
+            showCard(title() + "\nno picture for " + (STALL_LIMIT_MS / 1000) + "s, gave up after "
+                    + STALL_MAX_RETRIES + " tries - press the channel number");
+            restartIdleTimer();
+            ui.removeCallbacks(watchdog);
+            return;
+        }
+        Log.i(TAG, "watchdog: no traffic for " + (STALL_LIMIT_MS / 1000) + "s (uidRx=" + progress
+                + "), re-tuning - attempt " + stallRetries + " of " + STALL_MAX_RETRIES);
+        showCard(title() + "\nno picture, re-tuning (" + stallRetries + "/"
+                + STALL_MAX_RETRIES + ")");
+        restartIdleTimer();
+        lastProgressAt = now;
+        tune(current);
+    }
+
+    /**
+     * Bytes Android has counted for this app's uid. /proc/net/dev is not readable by an app on
+     * Android (it returned -1 in the measurement), but TrafficStats is the platform's own
+     * per-uid counter and needs no permission. It is the app's whole network use, which for this
+     * app is the stream plus its probes - so it is a liveness signal for the input rather than a
+     * counter of decoded pictures.
+     */
+    private long uidRxBytes() {
+        return android.net.TrafficStats.getUidRxBytes(android.os.Process.myUid());
+    }
+
+    /** The counters, for the log. */
+    private static String stats(IMedia.Stats s) {
+        return "demuxRead=" + s.demuxReadBytes + " read=" + s.readBytes
+                + " pictures=" + s.displayedPictures + " audioFrames=" + s.playedAbuffers;
+    }
 
     /**
      * The channel being watched last, found by address. Falls back to the first entry when

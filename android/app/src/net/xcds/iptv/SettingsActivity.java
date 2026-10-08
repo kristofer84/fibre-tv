@@ -62,6 +62,10 @@ public class SettingsActivity extends Activity {
     private TextView sourceLabel;
     private TextView status;
     private EditText urlField;
+    private EditText delayField;
+    private EditText trimMp2Field;
+    private EditText trimAc3Field;
+    private EditText trimOtherField;
     private Button importButton;
 
     private int dp(int value) {
@@ -106,6 +110,10 @@ public class SettingsActivity extends Activity {
         showSource();
         loadRows(Playlist.load(this, ASSET));
         profileNameField.setText(Playlist.activeName(this));
+        delayField.setText(String.valueOf(AudioTuning.delayMs(this)));
+        trimMp2Field.setText(String.valueOf(AudioTuning.trim(this, "MP2")));
+        trimAc3Field.setText(String.valueOf(AudioTuning.trim(this, "AC-3")));
+        trimOtherField.setText(String.valueOf(AudioTuning.trim(this, AudioTuning.OTHER)));
     }
 
     // ------------------------------------------------------------------- the UI
@@ -197,6 +205,29 @@ public class SettingsActivity extends Activity {
             }
         }));
 
+        TextView audioTitle = new TextView(this);
+        audioTitle.setText("Audio");
+        audioTitle.setTextColor(Color.WHITE);
+        audioTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        audioTitle.setPadding(0, dp(18), 0, dp(2));
+        root.addView(audioTitle);
+
+        TextView audioNote = new TextView(this);
+        audioNote.setText("Delay shifts audio against picture; trims are percentages of normal."
+                + " MP2 and AC-3 are rarely the same loudness, and TV audio often lags.");
+        audioNote.setTextColor(0xFF9E9E9E);
+        audioNote.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        root.addView(audioNote);
+
+        delayField = labelledField(root, "Delay (ms)", 2f);
+        delayField.setContentDescription("audio delay in milliseconds");
+        trimMp2Field = labelledField(root, "MP2 %", 1f);
+        trimMp2Field.setContentDescription("MP2 volume percent");
+        trimAc3Field = labelledField(root, "AC-3 %", 1f);
+        trimAc3Field.setContentDescription("AC-3 volume percent");
+        trimOtherField = labelledField(root, "Other %", 1f);
+        trimOtherField.setContentDescription("other tracks volume percent");
+
         TextView importTitle = new TextView(this);
         importTitle.setText("Import a playlist (m3u) from a URL");
         importTitle.setTextColor(Color.WHITE);
@@ -246,6 +277,24 @@ public class SettingsActivity extends Activity {
         params.setMargins(0, dp(8), 0, 0);
         button.setLayoutParams(params);
         return button;
+    }
+
+    /** A label and a short field on one row: the audio settings are numbers, not prose. */
+    private EditText labelledField(LinearLayout parent, String label, float weight) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView text = new TextView(this);
+        text.setText(label);
+        text.setTextColor(0xFF9E9E9E);
+        text.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        text.setMinWidth(dp(110));
+        row.addView(text);
+        EditText field = new EditText(this);
+        styleField(field, "", weight);
+        row.addView(field);
+        parent.addView(row);
+        return field;
     }
 
     /** A field sized for a television: one line, no taller than it needs to be. */
@@ -389,6 +438,10 @@ public class SettingsActivity extends Activity {
             loadRows(Playlist.load(this, ASSET));
             showSource();
             profileNameField.setText(Playlist.activeName(this));
+        delayField.setText(String.valueOf(AudioTuning.delayMs(this)));
+        trimMp2Field.setText(String.valueOf(AudioTuning.trim(this, "MP2")));
+        trimAc3Field.setText(String.valueOf(AudioTuning.trim(this, "AC-3")));
+        trimOtherField.setText(String.valueOf(AudioTuning.trim(this, AudioTuning.OTHER)));
             buildProfileRow();
             say("deleted " + name + "; now on " + Playlist.activeName(this));
         } else {
@@ -438,6 +491,7 @@ public class SettingsActivity extends Activity {
 
     private void save() {
         cancelDelete();
+        saveAudio();
         Playlist.rename(this, profileNameField.getText().toString());
         String text = Playlist.buildM3U(rowsAsChannels());
         if (Playlist.save(this, text, Playlist.EDITED)) {
@@ -448,6 +502,31 @@ public class SettingsActivity extends Activity {
             // would leave the app with nothing to play.
             say("not saved: every channel needs an address");
         }
+    }
+
+    /**
+     * Store the audio adjustments. Milliseconds here, converted to microseconds in exactly one
+     * place in the player - and the trims are percentages, clamped, so a typo cannot ask for a
+     * volume of 20000%.
+     */
+    private void saveAudio() {
+        int delay = AudioTuning.clamp(
+                AudioTuning.parse(delayField.getText().toString(), AudioTuning.delayMs(this)),
+                -AudioTuning.DELAY_LIMIT_MS, AudioTuning.DELAY_LIMIT_MS);
+        AudioTuning.setDelayMs(this, delay);
+        AudioTuning.setTrim(this, "MP2", AudioTuning.parse(trimMp2Field.getText().toString(),
+                AudioTuning.TRIM_DEFAULT));
+        AudioTuning.setTrim(this, "AC-3", AudioTuning.parse(trimAc3Field.getText().toString(),
+                AudioTuning.TRIM_DEFAULT));
+        AudioTuning.setTrim(this, AudioTuning.OTHER,
+                AudioTuning.parse(trimOtherField.getText().toString(), AudioTuning.TRIM_DEFAULT));
+        delayField.setText(String.valueOf(AudioTuning.delayMs(this)));
+        trimMp2Field.setText(String.valueOf(AudioTuning.trim(this, "MP2")));
+        trimAc3Field.setText(String.valueOf(AudioTuning.trim(this, "AC-3")));
+        trimOtherField.setText(String.valueOf(AudioTuning.trim(this, AudioTuning.OTHER)));
+        Log.i(TAG, "settings: audio delay " + AudioTuning.delayMs(this) + " ms, trims MP2 "
+                + AudioTuning.trim(this, "MP2") + "% AC-3 " + AudioTuning.trim(this, "AC-3")
+                + "% other " + AudioTuning.trim(this, AudioTuning.OTHER) + "%");
     }
 
     /**
