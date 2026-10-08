@@ -31,6 +31,19 @@ final class Channels {
             int colon = url.lastIndexOf(':');
             return (slash >= 0 && colon > slash) ? url.substring(slash + 1, colon) : url;
         }
+
+        /** "rtp://@233.171.129.211:5500" -> 5500. */
+        int port() {
+            int colon = url.lastIndexOf(':');
+            if (colon >= 0) {
+                try {
+                    return Integer.parseInt(url.substring(colon + 1).trim());
+                } catch (NumberFormatException ignored) {
+                    // fall through to the default below
+                }
+            }
+            return 5500;
+        }
     }
 
     private Channels() {

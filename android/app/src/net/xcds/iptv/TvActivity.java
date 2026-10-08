@@ -157,8 +157,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         metaRetry = new Runnable() {
             @Override
             public void run() {
+                // Logging only. Meta 0 for these streams turned out to be the MRL,
+                // so it must never be used as a channel name - doing exactly that
+                // is what put "rtp://233.171.129.211:5500" on the channel bar. The
+                // stream's own name comes from Sdt instead.
                 logMediaMetas();
-                readServiceName();
             }
         };
 
@@ -410,6 +413,39 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         return index >= 0 && index < channels.size() ? channels.get(index).name : "?";
     }
 
+    /**
+     * Ask the channel what it calls itself, off the UI thread and once per channel.
+     * Best-effort by design: any failure leaves the playlist's name in place, so the
+     * bar can neither go empty nor show something wrong.
+     */
+    private void probeServiceName(final int index) {
+        if (sdtNames == null || index < 0 || index >= sdtNames.length || sdtNames[index] != null) {
+            return;
+        }
+        final Channels.Channel channel = channels.get(index);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String name = Sdt.serviceName(channel.group(), channel.port(), 4000);
+                if (name == null || name.isEmpty()) {
+                    Log.i(TAG, "sdt: channel " + (index + 1) + " gave no service name");
+                    return;
+                }
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        sdtNames[index] = name;
+                        Log.i(TAG, "channel " + (index + 1) + " names itself '" + name + "'");
+                        if (index == current) {
+                            updateBar();
+                            showCard(title());
+                        }
+                    }
+                });
+            }
+        }, "sdt-" + (index + 1)).start();
+    }
+
     private void showChrome() {
         card.setVisibility(View.VISIBLE);
         controlsScroll.setVisibility(View.VISIBLE);
@@ -475,6 +511,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         // for one programme, and carrying it to the next channel is just wrong.
         spuWanted = 0;
         updateTrackButtons();
+        probeServiceName(index);
 
         Media media = new Media(libVLC, Uri.parse(channel.url));
         media.setHWDecoderEnabled(true, false);
@@ -571,7 +608,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             // and identical afterwards, so logging it per ES event just floods.
             logMediaTracks(when);
             logMediaMetas();
-            readServiceName();
         }    }
 
     /** The selectable audio tracks: libVLC always offers "Disable" as id -1 first. */
