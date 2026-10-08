@@ -34,6 +34,24 @@ final class Playlist {
     private static final String KEY_TEXT = "playlist_text";
     private static final String KEY_SOURCE = "playlist_source";
     private static final String KEY_REVISION = "playlist_revision";
+    private static final String KEY_LAST_CHANNEL = "last_channel";
+    private static final String KEY_IDS = "profile_ids";
+    private static final String KEY_ACTIVE = "profile_active";
+
+    /** The name a fresh profile gets: the built-in list is the LAN one. */
+    static final String DEFAULT_PROFILE_NAME = "LAN";
+
+    private static String keyName(String id) {
+        return "profile." + id + ".name";
+    }
+
+    private static String keyText(String id) {
+        return "profile." + id + ".text";
+    }
+
+    private static String keySource(String id) {
+        return "profile." + id + ".source";
+    }
 
     /** What the source label says when the list has never been touched. */
     static final String BUILT_IN = "built-in";
@@ -46,30 +64,157 @@ final class Playlist {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
     }
 
-    /** The saved m3u, or null when there is none worth reading. */
-    static String savedText(Context context) {
-        String text = prefs(context).getString(KEY_TEXT, null);
-        return text == null || text.trim().isEmpty() ? null : text;
+    /**
+     * Make sure a profile exists, migrating the single saved list that the first version of
+     * the settings screen stored. Called from every entry point, so the player and the
+     * settings screen always see the same shape.
+     *
+     * A profile is a name, an m3u text, and where that text came from. Empty text means the
+     * built-in list applies, which is what a fresh LAN profile is - and it is a complete
+     * list rather than a template, because the relay host differs between LAN and tunnel.
+     */
+    static void ensureProfile(Context context) {
+        List<String> ids = profileIds(context);
+        if (!ids.isEmpty()) {
+            if (activeId(context) == null) {
+                prefs(context).edit().putString(KEY_ACTIVE, ids.get(0)).apply();
+            }
+            return;
+        }
+        String legacyText = prefs(context).getString(KEY_TEXT, null);
+        String legacySource = prefs(context).getString(KEY_SOURCE, null);
+        String id = "p1";
+        prefs(context).edit()
+                .putString(KEY_IDS, id)
+                .putString(keyName(id), DEFAULT_PROFILE_NAME)
+                .putString(keyText(id), legacyText == null ? "" : legacyText)
+                .putString(keySource(id), legacySource == null ? BUILT_IN : legacySource)
+                .putString(KEY_ACTIVE, id)
+                .apply();
+        Log.i(TAG, "playlist: profile " + DEFAULT_PROFILE_NAME + " created"
+                + (legacyText == null ? " (built-in list)" : " (from the saved list)"));
     }
 
-    /** Where the current list came from, for the settings screen to show. */
-    static String source(Context context) {
-        return prefs(context).getString(KEY_SOURCE, BUILT_IN);
+    static List<String> profileIds(Context context) {
+        String ids = prefs(context).getString(KEY_IDS, "");
+        List<String> out = new ArrayList<>();
+        for (String id : ids.split(",")) {
+            if (!id.trim().isEmpty()) {
+                out.add(id.trim());
+            }
+        }
+        return out;
+    }
+
+    static String profileName(Context context, String id) {
+        return prefs(context).getString(keyName(id), id);
+    }
+
+    static String activeId(Context context) {
+        String id = prefs(context).getString(KEY_ACTIVE, null);
+        List<String> ids = profileIds(context);
+        return id != null && ids.contains(id) ? id : (ids.isEmpty() ? null : ids.get(0));
+    }
+
+    /** The name shown on the status card and in the settings screen. */
+    static String activeName(Context context) {
+        ensureProfile(context);
+        String id = activeId(context);
+        return id == null ? DEFAULT_PROFILE_NAME : profileName(context, id);
+    }
+
+    /** Switch lists. The caller reloads afterwards; nothing else changes here. */
+    static void switchTo(Context context, String id) {
+        ensureProfile(context);
+        if (!profileIds(context).contains(id)) {
+            return;
+        }
+        prefs(context).edit()
+                .putString(KEY_ACTIVE, id)
+                .putInt(KEY_REVISION, revision(context) + 1)
+                .apply();
+        Log.i(TAG, "playlist: switched to profile " + profileName(context, id));
+    }
+
+    /** A new profile holding a copy of the given list. */
+    static void createProfile(Context context, String name, String text) {
+        ensureProfile(context);
+        List<String> ids = profileIds(context);
+        String id = "p" + (System.currentTimeMillis() % 1000000L);
+        ids.add(id);
+        prefs(context).edit()
+                .putString(KEY_IDS, join(ids))
+                .putString(keyName(id), name)
+                .putString(keyText(id), text == null ? "" : text)
+                .putString(keySource(id),
+                        text == null || text.trim().isEmpty() ? BUILT_IN : EDITED)
+                .putString(KEY_ACTIVE, id)
+                .putInt(KEY_REVISION, revision(context) + 1)
+                .apply();
+        Log.i(TAG, "playlist: profile " + name + " created from the current list");
+    }
+
+    static void rename(Context context, String name) {
+        ensureProfile(context);
+        String id = activeId(context);
+        if (id == null || name == null || name.trim().isEmpty()) {
+            return;
+        }
+        prefs(context).edit().putString(keyName(id), name.trim()).apply();
+        Log.i(TAG, "playlist: profile renamed to " + name.trim());
+    }
+
+    /** Removes the active profile. Refuses to remove the last one: there is always a list. */
+    static boolean deleteActive(Context context) {
+        ensureProfile(context);
+        List<String> ids = profileIds(context);
+        String id = activeId(context);
+        if (id == null || ids.size() <= 1) {
+            Log.i(TAG, "playlist: refused to delete the only profile");
+            return false;
+        }
+        ids.remove(id);
+        prefs(context).edit()
+                .putString(KEY_IDS, join(ids))
+                .remove(keyName(id))
+                .remove(keyText(id))
+                .remove(keySource(id))
+                .putString(KEY_ACTIVE, ids.get(0))
+                .putInt(KEY_REVISION, revision(context) + 1)
+                .apply();
+        Log.i(TAG, "playlist: profile deleted, now on " + profileName(context, ids.get(0)));
+        return true;
+    }
+
+    private static String join(List<String> ids) {
+        StringBuilder out = new StringBuilder();
+        for (String id : ids) {
+            if (out.length() > 0) {
+                out.append(',');
+            }
+            out.append(id);
+        }
+        return out.toString();
     }
 
     /**
-     * Bumped on every save and reset. The player screen keeps the revision it loaded
-     * and reloads when this changes, which is how an edit reaches a running app without
-     * the two activities having to know about each other.
+     * Bumped on every save, reset, switch and profile edit. The player screen keeps the
+     * revision it loaded and reloads when this changes, which is how an edit reaches a
+     * running app without the two activities having to know about each other.
      */
     static int revision(Context context) {
         return prefs(context).getInt(KEY_REVISION, 0);
     }
 
+    /** "1 channel" / "3 channels": these count messages are read by people. */
+    static String describe(int count) {
+        return count + (count == 1 ? " channel" : " channels");
+    }
+
     /**
-     * The list to play. Never empty unless the built-in list is missing too: the saved
-     * text is only believed when it parses to at least one channel, and the asset is the
-     * floor underneath that.
+     * The list to play. Never empty unless the built-in list is missing too: the saved text
+     * is only believed when it parses to at least one channel, and the asset is the floor
+     * underneath that.
      */
     static List<Channels.Channel> load(Context context, String asset) {
         String saved = savedText(context);
@@ -88,45 +233,72 @@ final class Playlist {
             }
             return builtIn;
         } catch (RuntimeException e) {
-            // Without settings this could not happen, and it is not worth a crash now:
-            // an unreadable asset means an empty list and a message on the card.
+            // An unreadable asset means an empty list and a message on the card, not a crash:
+            // the settings screen exists to get out of that state.
             Log.i(TAG, "playlist: cannot read assets/" + asset + " (" + e + ")");
             return new ArrayList<>();
         }
     }
 
     /**
-     * Store the list, refusing anything that would leave nothing to play. Returns false
-     * when it refused, so the caller can tell the viewer rather than pretend.
+     * The address of the channel being watched, so a restart comes back to it. Keyed on the
+     * URL rather than the index: the list is editable now, so an index can point at a different
+     * channel after an edit while an address still identifies one channel.
      */
+    static String lastChannel(Context context) {
+        return prefs(context).getString(KEY_LAST_CHANNEL, null);
+    }
+
+    static void setLastChannel(Context context, String url) {
+        if (url != null && !url.trim().isEmpty()) {
+            prefs(context).edit().putString(KEY_LAST_CHANNEL, url).apply();
+        }
+    }
+
+    /** The active profile's m3u, or null when there is none and the built-in list applies. */
+    static String savedText(Context context) {
+        ensureProfile(context);
+        String id = activeId(context);
+        String text = id == null ? null : prefs(context).getString(keyText(id), null);
+        return text == null || text.trim().isEmpty() ? null : text;
+    }
+
+    /** Where the active profile's list came from, for the settings screen to show. */
+    static String source(Context context) {
+        ensureProfile(context);
+        String id = activeId(context);
+        return id == null ? BUILT_IN : prefs(context).getString(keySource(id), BUILT_IN);
+    }
+
     static boolean save(Context context, String text, String source) {
         int count = parseText(text).size();
         if (count == 0) {
             Log.i(TAG, "playlist: refused to save a list with no playable entries");
             return false;
         }
+        ensureProfile(context);
+        String id = activeId(context);
         prefs(context).edit()
-                .putString(KEY_TEXT, text)
-                .putString(KEY_SOURCE, source)
+                .putString(keyText(id), text)
+                .putString(keySource(id), source)
                 .putInt(KEY_REVISION, revision(context) + 1)
                 .apply();
-        Log.i(TAG, "playlist: saved " + describe(count) + " (" + source + ")");
+        Log.i(TAG, "playlist: saved " + describe(count) + " (" + source + ", profile "
+                + profileName(context, id) + ")");
         return true;
     }
 
-    /** "1 channel" / "3 channels": these count messages are read by people. */
-    static String describe(int count) {
-        return count + (count == 1 ? " channel" : " channels");
-    }
-
-    /** Back to the built-in list, which is done by forgetting the saved one. */
+    /** Back to the built-in list for this profile, which is done by forgetting its text. */
     static void reset(Context context) {
+        ensureProfile(context);
+        String id = activeId(context);
         prefs(context).edit()
-                .remove(KEY_TEXT)
-                .putString(KEY_SOURCE, BUILT_IN)
+                .remove(keyText(id))
+                .putString(keySource(id), BUILT_IN)
                 .putInt(KEY_REVISION, revision(context) + 1)
                 .apply();
-        Log.i(TAG, "playlist: reset to the built-in list");
+        Log.i(TAG, "playlist: profile " + profileName(context, id)
+                + " reset to the built-in list");
     }
 
     /**

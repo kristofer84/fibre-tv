@@ -61,6 +61,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Reached from the settings screen; not a launcher entry of its own, since it is
+             reference material rather than something to open directly. -->
+        <activity
+            android:name="net.xcds.iptv.AboutActivity"
+            android:label="@string/about_name"
+            android:exported="false"/>
+
         <!-- Reachable two ways: the Settings button in the player, and its own launcher
              entry. The second is the safety net for a playlist that does not play - the
              player opens on the launcher's tile and its Settings button is built before

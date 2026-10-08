@@ -207,6 +207,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     /** Set once Playing has fired for the current tuning, cleared on every retune. */
     private boolean started;
 
+    /** How long a typed channel number waits for another digit before it is tuned. */
+    private static final long DIGIT_TIMEOUT_MS = 1500;
+
+    /** Digits typed so far, tuned when they stop arriving. See digitTyped. */
+    private final StringBuilder typing = new StringBuilder();
+    private Runnable tuneTyped;
+
     private WifiManager.MulticastLock multicastLock;
     private WifiManager.WifiLock wifiLock;
 
@@ -264,6 +271,37 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                         showSubtitles(copy);
                     }
                 });
+            }
+        };
+
+        // A typed channel number is tuned once the digits stop arriving, rather than on the
+        // first one: the list is editable now and can hold more than nine channels.
+        tuneTyped = new Runnable() {
+            @Override
+            public void run() {
+                String typed = typing.toString();
+                typing.setLength(0);
+                if (typed.isEmpty()) {
+                    return;
+                }
+                int number;
+                try {
+                    number = Integer.parseInt(typed);
+                } catch (NumberFormatException e) {
+                    number = -1;
+                }
+                if (number >= 1 && number <= channels.size()) {
+                    Log.i(TAG, "tuned to typed channel " + number);
+                    tune(number - 1);
+                } else {
+                    // Say so rather than wrapping: on a seven channel list "12" must not
+                    // quietly tune channel 5.
+                    Log.i(TAG, "no channel " + typed + " (the list has "
+                            + channels.size() + ")");
+                    showCard(title() + "\nno channel " + typed
+                            + " (the list has " + channels.size() + ")");
+                    restartIdleTimer();
+                }
             }
         };
 
@@ -332,7 +370,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             }
         });
 
-        current = 0;
+        current = indexOfLastChannel();
         updateBar();
         showCard(title() + "\nready");
     }
@@ -623,7 +661,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         buttons.clear();
         bar.removeAllViews();
         buildChannelBar();
-        current = 0;
+        current = indexOfLastChannel();
         updateBar();
         Log.i(TAG, "playlist: reloaded, " + Playlist.describe(channels.size()));
         if (channels.isEmpty()) {
@@ -795,6 +833,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         index = ((index % count) + count) % count;
         current = index;
         Channels.Channel channel = channels.get(index);
+        Playlist.setLastChannel(this, channel.url);
 
         showCard(title() + "\njoining "
                 + (channel.multicast() ? channel.group() : channel.url) + ", please wait");
@@ -834,11 +873,16 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         player.play();
     }
 
+    /**
+     * The card's headline: which channel, and which list. The profile belongs here because
+     * "what am I watching" has two answers once the LAN and the tunnel hold different lists.
+     */
     private String title() {
         if (current < 0 || current >= channels.size()) {
             return "the operator TV";
         }
-        return (current + 1) + "   " + nameOf(current);
+        return (current + 1) + "   " + nameOf(current)
+                + "   (" + Playlist.activeName(this) + ")";
     }
 
     private void onPlayerEvent(MediaPlayer.Event event) {
@@ -1385,15 +1429,56 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 break;
         }
 
-        // Digits tune directly. There are seven channels, so one digit is enough.
-        if (keyCode >= KeyEvent.KEYCODE_1 && keyCode <= KeyEvent.KEYCODE_9) {
-            tune(keyCode - KeyEvent.KEYCODE_1);
+        // Digits accumulate into a channel number. One digit was enough while the list was
+        // the built-in seven; now that it is editable it can be longer, so the number is
+        // tuned when the digits stop arriving.
+        if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
+            digitTyped(keyCode - KeyEvent.KEYCODE_0);
             return true;
+        }
+        if (typing.length() > 0) {
+            // Any other key abandons a half-typed number rather than tuning to something the
+            // viewer did not finish typing: a stray press must not change channel later.
+            ui.removeCallbacks(tuneTyped);
+            typing.setLength(0);
+            Log.i(TAG, "channel typing abandoned");
+            showCard(title());
+            restartIdleTimer();
         }
         return super.onKeyDown(keyCode, event);
     }
 
     // ------------------------------------------------------------------ utils
+
+    /**
+     * The channel being watched last, found by address. Falls back to the first entry when
+     * that address is not in the list any more, which is what an edit can do to it.
+     */
+    private int indexOfLastChannel() {
+        String last = Playlist.lastChannel(this);
+        if (last != null) {
+            for (int i = 0; i < channels.size(); i++) {
+                if (last.equals(channels.get(i).url)) {
+                    Log.i(TAG, "starting on the last channel: " + channels.get(i).name);
+                    return i;
+                }
+            }
+            Log.i(TAG, "the last channel is not in this list any more, starting at 1");
+        }
+        return 0;
+    }
+
+    private void digitTyped(int digit) {
+        if (typing.length() >= 4) {
+            typing.setLength(0);            // four digits is already past any real list
+        }
+        typing.append(digit);
+        Log.i(TAG, "channel typing: " + typing);
+        showCard(title() + "\nchannel " + typing + " ...");
+        restartIdleTimer();
+        ui.removeCallbacks(tuneTyped);
+        ui.postDelayed(tuneTyped, DIGIT_TIMEOUT_MS);
+    }
 
     private int dp(int value) {
         return (int) (value * getResources().getDisplayMetrics().density + 0.5f);

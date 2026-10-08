@@ -1,6 +1,7 @@
 package net.xcds.iptv;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.text.InputType;
@@ -53,6 +54,10 @@ public class SettingsActivity extends Activity {
     private static final int MAX_BYTES = 1 << 20;
 
     private LinearLayout rows;
+    private LinearLayout profileRow;
+    private Button deleteButton;
+    private boolean deletePending;
+    private EditText profileNameField;
     private TextView sourceLabel;
     private TextView status;
     private EditText urlField;
@@ -66,8 +71,11 @@ public class SettingsActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(buildUi());
+        Playlist.ensureProfile(this);
+        buildProfileRow();
         showSource();
         loadRows(Playlist.load(this, ASSET));
+        profileNameField.setText(Playlist.activeName(this));
     }
 
     // ------------------------------------------------------------------- the UI
@@ -93,6 +101,29 @@ public class SettingsActivity extends Activity {
         sourceLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         sourceLabel.setPadding(0, dp(4), 0, dp(12));
         root.addView(sourceLabel);
+
+        // Profiles first, because everything below is the active profile's list. A profile
+        // is a complete list, not a template over one: the relay host differs between the
+        // LAN and the tunnel, so the two lists have nothing shareable in them.
+        profileRow = new LinearLayout(this);
+        profileRow.setOrientation(LinearLayout.HORIZONTAL);
+        profileRow.setGravity(Gravity.CENTER_VERTICAL);
+        root.addView(profileRow);
+
+        LinearLayout nameRow = new LinearLayout(this);
+        nameRow.setOrientation(LinearLayout.HORIZONTAL);
+        nameRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView nameLabel = new TextView(this);
+        nameLabel.setText("Profile name");
+        nameLabel.setTextColor(0xFF9E9E9E);
+        nameRow.addView(nameLabel);
+        profileNameField = new EditText(this);
+        profileNameField.setTextColor(Color.WHITE);
+        profileNameField.setHintTextColor(0xFF757575);
+        profileNameField.setSingleLine(true);
+        nameRow.addView(profileNameField, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(nameRow);
 
         rows = new LinearLayout(this);
         rows.setOrientation(LinearLayout.VERTICAL);
@@ -123,6 +154,13 @@ public class SettingsActivity extends Activity {
                 loadRows(Playlist.load(SettingsActivity.this, ASSET));
                 showSource();
                 say("reset: the built-in list is active again, and is shown above");
+            }
+        }));
+
+        root.addView(button("About and licences", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(SettingsActivity.this, AboutActivity.class));
             }
         }));
 
@@ -227,6 +265,94 @@ public class SettingsActivity extends Activity {
         }
     }
 
+    /**
+     * One button per profile, the active one marked, plus new and delete. Tapping a profile
+     * switches to it and reloads the rows, so what is on screen is always the list that is
+     * actually in use.
+     */
+    private void buildProfileRow() {
+        profileRow.removeAllViews();
+        for (final String id : Playlist.profileIds(this)) {
+            String name = Playlist.profileName(this, id);
+            boolean active = id.equals(Playlist.activeId(this));
+            Button button = new Button(this);
+            button.setText(active ? "\u2022 " + name : name);
+            button.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (id.equals(Playlist.activeId(SettingsActivity.this))) {
+                        return;
+                    }
+                    cancelDelete();
+                    Playlist.switchTo(SettingsActivity.this, id);
+                    loadRows(Playlist.load(SettingsActivity.this, ASSET));
+                    showSource();
+                    profileNameField.setText(Playlist.activeName(SettingsActivity.this));
+                    buildProfileRow();
+                    say("switched to " + Playlist.activeName(SettingsActivity.this));
+                }
+            });
+            profileRow.addView(button);
+        }
+        profileRow.addView(button("New profile", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                cancelDelete();
+                String name = "Profile " + (Playlist.profileIds(SettingsActivity.this).size() + 1);
+                Playlist.createProfile(SettingsActivity.this, name,
+                        Playlist.buildM3U(rowsAsChannels()));
+                loadRows(Playlist.load(SettingsActivity.this, ASSET));
+                showSource();
+                profileNameField.setText(Playlist.activeName(SettingsActivity.this));
+                buildProfileRow();
+                say("created " + name + " as a copy of the list that was on screen");
+            }
+        }));
+        deleteButton = button("Delete this profile", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                confirmDelete();
+            }
+        });
+        profileRow.addView(deleteButton);
+    }
+
+    /**
+     * Deleting a list is the one action here that loses something, so it asks - but in place
+     * rather than with a dialog. A dialog is awkward to drive with a remote (the buttons are
+     * at the bottom of a window that has its own focus rules) and the confirmation is just as
+     * clear as a button that says what the next tap will do. Any other action clears the
+     * pending delete, so it cannot be triggered by accident later.
+     */
+    private void confirmDelete() {
+        if (!deletePending) {
+            deletePending = true;
+            deleteButton.setText("Tap again to delete " + Playlist.activeName(this));
+            say("that will forget this profile's list: tap Delete again, or anything else to cancel");
+            return;
+        }
+        deletePending = false;
+        String name = Playlist.activeName(this);
+        if (Playlist.deleteActive(this)) {
+            loadRows(Playlist.load(this, ASSET));
+            showSource();
+            profileNameField.setText(Playlist.activeName(this));
+            buildProfileRow();
+            say("deleted " + name + "; now on " + Playlist.activeName(this));
+        } else {
+            deleteButton.setText("Delete this profile");
+            say("that is the only profile, so it was not deleted");
+        }
+    }
+
+    /** Any other action cancels a pending delete. */
+    private void cancelDelete() {
+        if (deletePending) {
+            deletePending = false;
+            deleteButton.setText("Delete this profile");
+        }
+    }
+
     private void showSource() {
         sourceLabel.setText("List in use: " + Playlist.source(this)
                 + (Playlist.savedText(this) == null ? "" : "  (saved on this device)"));
@@ -259,6 +385,8 @@ public class SettingsActivity extends Activity {
     }
 
     private void save() {
+        cancelDelete();
+        Playlist.rename(this, profileNameField.getText().toString());
         String text = Playlist.buildM3U(rowsAsChannels());
         if (Playlist.save(this, text, Playlist.EDITED)) {
             Log.i(TAG, "settings: saved, returning to the player");

@@ -4,4 +4,5 @@
     <!-- A separate label so the second launcher entry is distinguishable on a phone,
          where both icons appear. -->
     <string name="settings_name">the operator TV settings</string>
+    <string name="about_name">About the operator TV</string>
 </resources>
