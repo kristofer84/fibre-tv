@@ -81,6 +81,31 @@ Four traps are worth knowing about if you bump a version:
    pruned out either — libVLC's JNI looks its Java classes up by name, so
    tree-shaking the jar would break playback.
 
+### Where the channel names come from
+
+The bar shows what each stream calls itself rather than what the playlist calls it:
+`SVT1 Stockholm HD` instead of `SVT1 HD`, and `TV6 HD (S) a` with the operator's own
+truncation. The playlist name stays as the fallback, so an untuned channel, or one
+whose descriptor the parser will not accept, still shows something sensible.
+
+Two things here are worth knowing before changing it:
+
+- **libVLC cannot supply this.** Its media title for these streams *is* populated,
+  but the value is the MRL - `rtp://233.171.129.211:5500`. An earlier version of
+  this app used it as a channel name and put that URL on the bar. `Sdt` parses PID
+  `0x0011` directly instead: table `0x42`, `service_descriptor` tag `0x48`.
+- **Byte reads must be masked.** The RTP header check started as
+  `(data[0] >> 6) == 2`, which is correct in Python but never true in Java: `0x80`
+  is a *signed* byte, so `-128 >> 6` is `-2`. It silently found 81 transport
+  packets in 4479 datagrams - no SDT, no names. `rtpHeaderLength` masks with `0xc0`
+  now, and that was the only unmasked byte read in the file.
+
+The probe joins the group briefly, once per channel, and leaves immediately. It is
+best-effort and logged, so a channel that stops naming itself shows up in logcat.
+`234.213.112.43` (Lokal kanal) is the one that never does: it is the odd feed out,
+with a non-standard service_type and an `Intinor` provider, and `ffprobe` cannot
+read a name from it either.
+
 ### Continuous integration
 
 [`.github/workflows/android.yml`](../.github/workflows/android.yml) builds the apk

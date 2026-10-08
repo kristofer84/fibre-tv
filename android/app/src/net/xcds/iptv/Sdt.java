@@ -52,9 +52,7 @@ final class Sdt {
     static String serviceName(String group, int port, int timeoutMs) {
         MulticastSocket socket = null;
         int datagrams = 0;
-        int tsPackets = 0;
         int sdtPackets = 0;
-        String sample = null;
         try {
             InetAddress groupAddress = InetAddress.getByName(group);
 
@@ -72,12 +70,7 @@ final class Sdt {
                 DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                 socket.receive(packet);
                 datagrams++;
-                if (sample == null) {
-                    sample = hexOf(buffer, packet.getLength()) + " len=" + packet.getLength();
-                }
-                int[] counts = countPackets(buffer, packet.getLength());
-                tsPackets += counts[0];
-                sdtPackets += counts[1];
+                sdtPackets += countSdtPackets(buffer, packet.getLength());
                 String name = parseDatagram(buffer, packet.getLength());
                 if (name != null && !name.isEmpty()) {
                     Log.i(TAG, "sdt: " + group + " named '" + name + "' after "
@@ -85,11 +78,11 @@ final class Sdt {
                     return name;
                 }
             }
-            // The whole point of this line: zero datagrams means the group is not
-            // being delivered to a second socket at all, which is a different
-            // problem from datagrams arriving and the parse failing.
-            Log.i(TAG, "sdt: " + group + " no name: datagrams=" + datagrams
-                    + " ts=" + tsPackets + " sdt=" + sdtPackets + " first=[" + sample + "]");
+            // Kept on purpose: this is the only signal if a channel stops naming
+            // itself, and the SDT count is what says whether the section was there
+            // at all, or whether the parse is at fault.
+            Log.i(TAG, "sdt: " + group + " gave no service name (" + datagrams
+                    + " datagrams, " + sdtPackets + " SDT packets)");
         } catch (IOException e) {
             Log.i(TAG, "sdt: " + group + " unavailable (" + e + ")");
         } finally {
@@ -98,18 +91,6 @@ final class Sdt {
             }
         }
         return null;
-    }
-
-    /** The first bytes of a datagram, so a failed probe can say what arrived. */
-    private static String hexOf(byte[] data, int length) {
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < length && i < 16; i++) {
-            if (i > 0) {
-                out.append(' ');
-            }
-            out.append(String.format("%02x", data[i] & 0xff));
-        }
-        return out.toString();
     }
 
     /**
@@ -125,22 +106,20 @@ final class Sdt {
         return (length > 12 && (data[0] & 0xc0) == 0x80) ? 12 : 0;
     }
 
-    /** {transport packets, SDT packets} present in one datagram. */
-    private static int[] countPackets(byte[] data, int length) {
+    /** How many SDT packets a datagram held. Only used for the failure log. */
+    private static int countSdtPackets(byte[] data, int length) {
         int offset = rtpHeaderLength(data, length);
-        int ts = 0;
         int sdt = 0;
         for (int i = offset; i + TS_PACKET <= length; i += TS_PACKET) {
             if ((data[i] & 0xff) != TS_SYNC) {
                 continue;
             }
-            ts++;
             int pid = ((data[i + 1] & 0x1f) << 8) | (data[i + 2] & 0xff);
             if (pid == PID_SDT) {
                 sdt++;
             }
         }
-        return new int[] {ts, sdt};
+        return sdt;
     }
 
     /** A datagram is an RTP header followed by whole transport packets. */
