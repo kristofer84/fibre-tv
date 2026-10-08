@@ -442,11 +442,16 @@ final class Teletext implements Runnable {
      * One teletext row: seven bits per byte plus odd parity, then the national
      * option subset. This is the Swedish/Finnish/Hungarian subset, which is the one
      * these channels use; control codes become spaces.
+     *
+     * The reversal matters as much here as it does for the addresses: the text bytes
+     * are bit-reversed on the wire like every other payload byte, and reading them
+     * unreversed yields letters that are almost-but-not-quite right - which is how
+     * this shipped once, as "OPPwG &'/" where the stream said "och sortera".
      */
     private static String text(byte[] data, int start, int length) {
         StringBuilder out = new StringBuilder(length);
         for (int i = 0; i < length && start + i < data.length; i++) {
-            int value = data[start + i] & 0x7f;
+            int value = REVERSED[data[start + i] & 0xff] & 0x7f;
             if (value < 0x20) {
                 out.append(' ');                    // colour and control codes
                 continue;
