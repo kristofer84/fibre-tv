@@ -764,7 +764,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         new Thread(new Runnable() {
             @Override
             public void run() {
-                final String name = Sdt.serviceName(channel.group(), channel.port(), 4000);
+                final String name = Sdt.serviceName(channel.url, 4000);
                 if (name == null || name.isEmpty()) {
                     Log.i(TAG, "sdt: channel " + (index + 1) + " gave no service name");
                     return;
@@ -948,15 +948,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         stopReader();
         showSubtitles(Collections.<String>emptyList());
         updateTrackButtons();
-        if (channel.multicast()) {
+        if (Ts.canSniff(channel.url)) {
+            // A group to join or a relay to GET; Ts knows which and the sniffers do not care.
             probeServiceName(index);
             discoverSubtitlePages(index);
         } else {
-            // One line per tune, rather than a silence that looks like a bug: the stream's
-            // own name and the teletext subtitle pages both come from joining the group,
-            // and a relay or http:// address has no group to join. Playback is unaffected -
-            // the bar keeps the playlist name and the Subtitles button finds no pages.
-            Log.i(TAG, "not a group address, so no stream name and no teletext subtitles: "
+            // One line per tune, rather than a silence that looks like a bug. Playback is
+            // unaffected either way: the bar keeps the playlist name and the Subtitles button
+            // finds no pages.
+            Log.i(TAG, "nothing to sniff for this address, so no stream name and no teletext: "
                     + channel.url);
         }
         updateSubsButton();
@@ -1266,7 +1266,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private void startReader(int index, Teletext.Page page) {
         stopReader();
         Channels.Channel channel = channels.get(index);
-        Teletext teletext = new Teletext(channel.group(), channel.port(), subtitleListener);
+        Teletext teletext = new Teletext(channel.url, subtitleListener);
         if (page != null) {
             teletext.select(page);
         }

@@ -3,15 +3,11 @@ package net.xcds.iptv;
 import android.util.Log;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.MulticastSocket;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Reads the teletext subtitle pages of one multicast group and reports the lines
+ * Reads the teletext subtitle pages of one channel and reports the lines
  * to draw.
  *
  * Why this exists rather than using libVLC's teletext decoder: VLC renders teletext
@@ -124,8 +120,8 @@ final class Teletext implements Runnable {
         }
     }
 
-    private final String group;
-    private final int port;
+    /** The channel's URL: a multicast group or a relay, decided by Ts. */
+    private final String url;
     private final Listener listener;
 
     /** Which page to follow, or null while none is selected. */
@@ -141,9 +137,8 @@ final class Teletext implements Runnable {
     private final String[] rows = new String[32];
     private int assembling = -1;
 
-    Teletext(String group, int port, Listener listener) {
-        this.group = group;
-        this.port = port;
+    Teletext(String url, Listener listener) {
+        this.url = url;
         this.listener = listener;
     }
 
@@ -167,30 +162,34 @@ final class Teletext implements Runnable {
 
     @Override
     public void run() {
-        MulticastSocket socket = null;
+        Ts.Source source = null;
         byte[] pending = new byte[0];
         try {
-            socket = new MulticastSocket(null);
-            socket.setReuseAddress(true);
-            socket.setSoTimeout(2000);
-            socket.bind(new InetSocketAddress(port));
-            socket.joinGroup(InetAddress.getByName(group));
+            source = Ts.open(url, 2000);
 
             byte[] buffer = new byte[2048];
             while (running) {
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                int length;
                 try {
-                    socket.receive(packet);
+                    length = source.readPacket(buffer);
                 } catch (IOException timeout) {
                     continue;                       // keeps the loop interruptible
                 }
-                pending = consume(buffer, packet.getLength(), pending);
+                if (length == 0) {
+                    Log.i(TAG, "teletext: " + url + " ended");
+                    break;
+                }
+                pending = consume(buffer, length, pending);
             }
         } catch (IOException e) {
-            Log.i(TAG, "teletext: " + group + " unavailable (" + e + ")");
+            Log.i(TAG, "teletext: " + url + " unavailable (" + e + ")");
         } finally {
-            if (socket != null) {
-                socket.close();
+            if (source != null) {
+                try {
+                    source.close();
+                } catch (IOException ignored) {
+                    // already gone; nothing to report
+                }
             }
         }
     }

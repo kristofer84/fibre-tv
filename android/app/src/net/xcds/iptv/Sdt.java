@@ -3,10 +3,6 @@ package net.xcds.iptv;
 import android.util.Log;
 
 import java.io.IOException;
-import java.net.DatagramPacket;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.MulticastSocket;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -28,9 +24,10 @@ import java.nio.charset.StandardCharsets;
  * is where the "leading 0x15 byte" on Lokal kanal came from; it is stripped here
  * rather than being treated as text.
  *
- * The group is joined only for the probe and left immediately afterwards, so the
- * extra membership is short-lived. Everything is best-effort: any failure returns
- * null and the caller keeps the playlist's name.
+ * The stream is opened only for the probe and closed immediately afterwards, so the
+ * extra membership - or, on a relay, the extra connection - is short-lived. Which one
+ * it is depends on the channel's URL; Ts decides, this class does not care. Everything
+ * is best-effort: any failure returns null and the caller keeps the playlist's name.
  */
 final class Sdt {
 
@@ -49,31 +46,26 @@ final class Sdt {
      * The service name for one group, or null. Blocks for at most timeoutMs, so
      * call it off the main thread.
      */
-    static String serviceName(String group, int port, int timeoutMs) {
-        MulticastSocket socket = null;
+    static String serviceName(String url, int timeoutMs) {
+        Ts.Source source = null;
         int datagrams = 0;
         int sdtPackets = 0;
         try {
-            InetAddress groupAddress = InetAddress.getByName(group);
-
-            // reuse before bind: the player is already bound to this port for the
-            // same group, and without it this bind fails outright.
-            socket = new MulticastSocket(null);
-            socket.setReuseAddress(true);
-            socket.setSoTimeout(timeoutMs);
-            socket.bind(new InetSocketAddress(port));
-            socket.joinGroup(groupAddress);
+            source = Ts.open(url, timeoutMs);
 
             byte[] buffer = new byte[2048];
             long deadline = System.currentTimeMillis() + timeoutMs;
             while (System.currentTimeMillis() < deadline) {
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                socket.receive(packet);
+                int length = source.readPacket(buffer);
+                if (length == 0) {
+                    Log.i(TAG, "sdt: " + url + " ended before it named anything");
+                    break;
+                }
                 datagrams++;
-                sdtPackets += countSdtPackets(buffer, packet.getLength());
-                String name = parseDatagram(buffer, packet.getLength());
+                sdtPackets += countSdtPackets(buffer, length);
+                String name = parseDatagram(buffer, length);
                 if (name != null && !name.isEmpty()) {
-                    Log.i(TAG, "sdt: " + group + " named '" + name + "' after "
+                    Log.i(TAG, "sdt: " + url + " named '" + name + "' after "
                             + datagrams + " datagrams");
                     return name;
                 }
@@ -81,13 +73,17 @@ final class Sdt {
             // Kept on purpose: this is the only signal if a channel stops naming
             // itself, and the SDT count is what says whether the section was there
             // at all, or whether the parse is at fault.
-            Log.i(TAG, "sdt: " + group + " gave no service name (" + datagrams
+            Log.i(TAG, "sdt: " + url + " gave no service name (" + datagrams
                     + " datagrams, " + sdtPackets + " SDT packets)");
         } catch (IOException e) {
-            Log.i(TAG, "sdt: " + group + " unavailable (" + e + ")");
+            Log.i(TAG, "sdt: " + url + " unavailable (" + e + ")");
         } finally {
-            if (socket != null) {
-                socket.close();
+            if (source != null) {
+                try {
+                    source.close();
+                } catch (IOException ignored) {
+                    // already gone; nothing to report
+                }
             }
         }
         return null;

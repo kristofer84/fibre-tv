@@ -66,7 +66,7 @@ final class Channels {
          * and what the log should say about it.
          */
         boolean multicast() {
-            return url.startsWith("rtp://") || url.startsWith("udp://");
+            return Ts.isMulticast(url);
         }
     }
 
