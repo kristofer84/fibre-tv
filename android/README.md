@@ -132,6 +132,26 @@ plus `KEYSTORE_PASSWORD` and `KEY_PASSWORD`. Without them each run generates a
 throwaway key: the apk still installs, but Android will refuse to upgrade an
 existing install signed by a different key, so a release wants the secret.
 
+### Comparing two builds
+
+**Compare `classes.dex`'s md5, never the apk's.** Four independent build paths -
+native arm64, emulated amd64, native x86_64 and GitHub Actions - produce a
+byte-identical dex, and the build prints that hash, so a CI log can be checked
+against a local build without downloading anything.
+
+The apk hash will never match, and the reason is worth knowing because "zip
+timestamps" is only half of it. Every entry's data, size and CRC-32 are identical
+and the concatenated decompressed payloads hash the same; the differences are 589
+bytes of metadata - DOS timestamps in each entry header and in the central
+directory, plus a UT extra field. But apksigner's v2/v3 signing block covers the
+whole archive, so those timestamps propagate into the signature itself, which is
+why the file hash moves while the contents do not.
+
+Byte-identical apks would need normalised mtimes (`SOURCE_DATE_EPOCH`, or
+`touch -t 198001010000`) and `zip -X` to drop the extra fields; PKCS#1 v1.5
+signing is deterministic, so the signature would settle too. Not worth doing here -
+the dex is the number that identifies the code.
+
 ### Installing
 
 The apk is signed with a local key in `keys/` (created on first build). Keep it:
