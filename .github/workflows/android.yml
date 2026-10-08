@@ -1,0 +1,77 @@
+name: android apk
+
+# Builds android/app/build/iptv-tv.apk in a container, exactly as `android/build.sh`
+# does locally, and attaches it to a release when a tag is pushed.
+#
+#   manually:  Actions -> android apk -> Run workflow
+#   release:   git tag v1.1 && git push --tags
+#
+# Runs on ubuntu-latest (x86_64). The image is architecture-independent by design:
+# the only arch-specific pieces are Debian packages, and the two Android tools that
+# are x86-64-only (aapt2, zipalign in build-tools) are deliberately not used.
+
+# Note: there is deliberately NO `paths` filter on `push`. GitHub does not apply
+# path filters usefully to tag pushes (a tag has no changed-file list), so adding
+# one here would stop `git push --tags` from ever building the release. It is set
+# on pull_request only, where it behaves as expected.
+on:
+  push:
+    branches: [master]
+    tags: ['v*']
+  pull_request:
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write          # to attach the apk to a release
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Keyed on build.sh, which is where the toolchain versions are pinned: bump a
+      # version there and the cache misses instead of going stale.
+      - name: Cache toolchain
+        uses: actions/cache@v4
+        with:
+          path: android/toolchain
+          key: iptv-toolchain-${{ hashFiles('android/build.sh') }}
+
+      # Optional. Set these repository secrets to sign with the same key as local
+      # builds:
+      #
+      #   ANDROID_KEYSTORE_BASE64  base64 -w0 android/keys/iptv-tv.jks
+      #   KEYSTORE_PASSWORD        the store password
+      #   KEY_PASSWORD             the key password (pkcs12 wants these equal)
+      #
+      # Without them the build generates a throwaway key: the apk still installs,
+      # but it cannot upgrade an install signed by a different key.
+      - name: Build apk
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./android/build.sh
+
+      - name: Upload apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: iptv-tv-apk
+          path: android/app/build/iptv-tv.apk
+          if-no-files-found: error
+
+      # Downloader on the TV can install straight from the release asset URL.
+      - name: Attach apk to release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "$GITHUB_REF_NAME" android/app/build/iptv-tv.apk --clobber \
+            || gh release create "$GITHUB_REF_NAME" android/app/build/iptv-tv.apk \
+                 --title "$GITHUB_REF_NAME" --generate-notes

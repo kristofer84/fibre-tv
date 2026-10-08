@@ -1,0 +1,8 @@
+# Toolchain archives (~210 MB). Pinned in build.sh, re-fetched on demand.
+toolchain/
+
+# Signing key. Losing it means uninstall/reinstall to upgrade the app.
+keys/
+
+# Build output.
+app/build/
