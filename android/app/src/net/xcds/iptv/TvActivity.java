@@ -95,11 +95,20 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * bottom, so 140dp leaves the overlay 12px clear of it while the bar is up. With
      * the bar away the overlay drops to 24dp, which is where subtitles belong.
      */
-    private static final int SUBTITLE_MARGIN_IDLE_DP = 12;
+    private static final int SUBTITLE_MARGIN_IDLE_DP = 24;
     private static final int SUBTITLE_MARGIN_CHROME_DP = 140;
 
     /** Subtitle text size. 26sp is 85% of the 30sp this started at. */
     private static final int SUBTITLE_TEXT_SP = 26;
+
+    /**
+     * Padding inside the subtitle box, and why it is separately tunable from the
+     * margin: the margin is where the box sits on screen, the padding is how much
+     * black surrounds the text. Kristofer wanted the box tighter around the words
+     * without the box moving up the screen, which is this and not the margin.
+     */
+    private static final int SUBTITLE_PADDING_H_DP = 10;
+    private static final int SUBTITLE_PADDING_V_DP = 5;
 
     /**
      * Worth recording because it looks like it should work: libVLC does populate a
@@ -366,7 +375,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, SUBTITLE_TEXT_SP);
         subtitleView.setLineSpacing(dp(4), 1.0f);
         subtitleView.setGravity(Gravity.CENTER);
-        subtitleView.setPadding(dp(20), dp(10), dp(20), dp(10));
+        subtitleView.setPadding(dp(SUBTITLE_PADDING_H_DP), dp(SUBTITLE_PADDING_V_DP),
+                dp(SUBTITLE_PADDING_H_DP), dp(SUBTITLE_PADDING_V_DP));
         // Near-opaque rather than solid: white on black is what was asked for, and
         // a hint of picture through the box keeps it from looking like a hole.
         subtitleView.setBackgroundColor(0xE0000000);
