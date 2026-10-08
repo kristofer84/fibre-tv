@@ -1,4 +1,4 @@
-# The fibre line
+## The fibre line
 
 The WAN is a trunk with one VLAN per service:
 
@@ -11,7 +11,7 @@ The WAN is a trunk with one VLAN per service:
 Internet is untagged, so plain `address dhcp` on the WAN works. TV needs its own VLAN
 interface. VLAN 501 is well known for the operator; support has confirmed it in forum threads.
 
-## The ISP's router
+### The ISP's router
 
 The ISP router (Inteno here, Icotera i4882 elsewhere) puts its TV ports in VLAN 501:
 tagged on the WAN, untagged to the box.
@@ -22,7 +22,7 @@ tagged on the WAN, untagged to the box.
 | 2 | off | untagged |
 | **501** | **untagged** | **tagged** |
 
-## Replacing it
+### Replacing it
 
 You need a router that can:
 

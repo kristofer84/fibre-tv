@@ -1,6 +1,6 @@
-# Bandwidth and measuring it
+## Bandwidth and measuring it
 
-## Wired LAN
+### Wired LAN
 
 The EdgeRouter X switch (MT7621/MT7530) can't do IGMP snooping, so while a stream is
 running it reaches every wired port.
@@ -17,7 +17,7 @@ Measured on a wired host with no memberships, promiscuous capture, 5-second samp
 - Any LAN device triggers it, not just the set-top box.
 - At 1 to 2% of gigabit, it isn't worth fixing.
 
-## WiFi
+### WiFi
 
 The TP-Link Deco mesh snoops and converts multicast to unicast per client. So:
 
@@ -26,7 +26,7 @@ The TP-Link Deco mesh snoops and converts multicast to unicast per client. So:
 - a promiscuous WiFi capture won't show the stream. Only the Ethernet destination
   address reveals the conversion, since `tcpdump` shows `233.x.x.x` either way.
 
-## Measurement pitfalls
+### Measurement pitfalls
 
 - **Verify the capture works.** `tcpdump` without `sudo` reported zero traffic, which
   I first took to mean no flooding.

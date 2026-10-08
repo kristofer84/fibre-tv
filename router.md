@@ -1,4 +1,4 @@
-# Router configuration (EdgeOS / EdgeRouter X)
+## Router configuration (EdgeOS / EdgeRouter X)
 
 EdgeOS v3.0.1. `eth0` is the WAN, `switch0` the LAN bridge.
 
@@ -36,7 +36,7 @@ firewall {
 
 `hwnat` stays enabled. Nothing else needs changing.
 
-## Common problems
+### Common problems
 
 1. **The IGMP proxy upstream must be `eth0.501`, not `eth0`.** Otherwise igmpproxy
    fails at every boot with `There must be at least 1 Vif as upstream.` and nothing
@@ -58,7 +58,7 @@ firewall {
    so every wired port gets the stream (12 to 18 Mbit/s). See
    [measurements.md](measurements.md).
 
-## Checking
+### Checking
 
 ```sh
 show configuration commands | grep igmp        # upstream should read eth0.501

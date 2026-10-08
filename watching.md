@@ -1,6 +1,6 @@
-# Watching
+## Watching
 
-## On the LAN
+### On the LAN
 
 Any device on the LAN, wired or WiFi, can play the multicast directly.
 
@@ -27,7 +27,7 @@ vlc channels.m3u8
 vlc "rtp://@233.171.129.213:5500"          # one channel
 ```
 
-## Over a VPN
+### Over a VPN
 
 Multicast doesn't pass through a routed VPN, so convert it to HTTP on a LAN machine.
 **`udpxy`** does this (packaged in OpenWrt and Debian up to bookworm).
