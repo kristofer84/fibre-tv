@@ -55,6 +55,13 @@ for abi in $ABIS; do
 done
 
 ANDROID_JAR=$(echo "$BUILD"/tc/android-*/android.jar)
+# Printed so a build that later disagrees can be diagnosed from its own log: the
+# JDK and aapt come from apt on debian:trixie-slim at build time, so a point
+# release there could change javac's output - and so the dex - with nothing in this
+# repository having moved.
+javac -version 2>&1 | sed 's/^/  jdk:  /'
+aapt version 2>&1 | sed 's/^/  aapt: /'
+
 # R8's jar is already a jar; d8 is run straight out of it.
 D8_JAR=/toolchain/$R8_JAR
 [ -s "$D8_JAR" ] || { echo "missing $D8_JAR" >&2; exit 1; }
@@ -134,4 +141,8 @@ printf 'licences in apk: '; unzip -l "$BUILD/iptv-tv.apk" | awk '$4 ~ /^assets\/
 printf 'dex contains: '; for c in net/xcds/iptv/TvActivity org/videolan/libvlc/MediaPlayer org/videolan/libvlc/interfaces/IVLCVout; do
     unzip -p "$BUILD/iptv-tv.apk" classes.dex | grep -aq "$c" && printf '%s ' "$c" || printf 'MISSING(%s) ' "$c"
 done; echo
+# The identity of this build in one number. Two builds can share a byte size, so
+# this is what says whether a rebuild is the same artifact or a different one.
+printf 'classes.dex md5: '; unzip -p "$BUILD/iptv-tv.apk" classes.dex | md5sum | awk '{print $1}'
+printf 'apk sha256: '; sha256sum "$BUILD/iptv-tv.apk" | awk '{print $1}'
 printf '\n%s (%s bytes)\n' "$BUILD/iptv-tv.apk" "$(stat -c%s "$BUILD/iptv-tv.apk")"
