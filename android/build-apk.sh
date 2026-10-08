@@ -38,6 +38,14 @@ mkdir -p "$BUILD/assets/licenses"
 cp android/THIRD-PARTY.md android/LICENSE "$BUILD/assets/licenses/"
 cp android/licenses/*.txt "$BUILD/assets/licenses/"
 
+# The reading font for the subtitle overlay. Literata is SIL OFL, which requires
+# the licence to travel with the font, so OFL.txt goes in beside the other
+# attribution. A variable font (opsz,wght): Typeface.createFromAsset uses the
+# default instance, which is Regular, and that is the weight wanted here.
+mkdir -p "$BUILD/assets/fonts"
+cp android/app/fonts/literata.ttf "$BUILD/assets/fonts/literata.ttf"
+cp android/app/fonts/OFL.txt "$BUILD/assets/licenses/OFL.txt"
+
 step "unpack toolchain"
 unzip -qo "/toolchain/$PLATFORM_ZIP" 'android-*/android.jar' -d "$BUILD/tc"
 
@@ -135,6 +143,9 @@ apksigner verify --print-certs "$BUILD/iptv-tv.apk"
 aapt dump badging "$BUILD/iptv-tv.apk" | grep -E "^package|^application|^launchable|^sdkVersion|^targetSdkVersion|^native-code|^uses-permission" | head -12
 printf 'native libs: '; unzip -l "$BUILD/iptv-tv.apk" | awk '$4 ~ /^lib\// {split($4,a,"/"); print a[2]}' | sort -u | tr '\n' ' '; echo
 printf 'licences in apk: '; unzip -l "$BUILD/iptv-tv.apk" | awk '$4 ~ /^assets\/licenses\// {print $4}' | sed 's#assets/licenses/##' | tr '\n' ' '; echo
+# The overlay falls back to the system font when this is missing, so an apk
+# without it still runs - which is exactly why it needs saying out loud here.
+printf 'font in apk: '; unzip -l "$BUILD/iptv-tv.apk" | awk '$4 ~ /^assets\/fonts\// {print $4}' | sed 's#assets/fonts/##' | tr '\n' ' '; echo
 # Guard the mistake that cost the first device run: libVLC's Java API must be
 # inside classes.dex, or the activity cannot even load. grep -a, not strings:
 # strings silently misses some descriptors (it reported a false MISSING for one).

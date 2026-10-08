@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -29,6 +30,7 @@ import org.videolan.libvlc.interfaces.IMedia;
 import org.videolan.libvlc.interfaces.IVLCVout;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -39,7 +41,10 @@ import java.util.Locale;
  * the AC3 and MP2 audio work.
  *
  * The streams carry two audio tracks (MPEG-1 Layer II and AC-3, both Swedish) and
- * three teletext subtitle pages, so both are selectable from the channel bar.
+ * three teletext subtitle pages, so both are selectable from the channel bar. The
+ * audio tracks are handed to libVLC; the subtitle pages are not, because libVLC
+ * draws teletext as a 40x25 grid upscaled to the panel. Teletext decodes those
+ * pages here and they are drawn as text with a reading font instead.
  *
  * The things that make it behave on Android rather than just on a desktop:
  *
@@ -47,6 +52,9 @@ import java.util.Locale;
  *     (libVLC does not take one for you);
  *   - playback is stopped in onStop, so leaving the app actually leaves the group
  *     instead of pulling 12-18 Mbit/s forever while nobody is watching;
+ *   - the teletext reader joins that same group and is stopped for the same reason:
+ *     on OFF, on a retune and in onStop, so it is never left pulling the group
+ *     after the picture has gone;
  *   - attachViews/detachViews are made idempotent, because the system can call
  *     onStart on a vout that is already attached right after an in-place update,
  *     and libVLC throws IllegalStateException for that.
@@ -66,6 +74,32 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * teletext ones type=2.
      */
     private static final int TRACK_TYPE_AUDIO = 0;
+
+    /**
+     * How long to look for a channel's subtitle pages when it is tuned, and how
+     * often to check whether they have turned up. The pages are listed in the
+     * stream's PMT, so they cannot be known without reading the transport stream
+     * once - but the reader is only worth running while someone wants subtitles, so
+     * this is one short look per channel rather than a permanent second socket.
+     */
+    private static final long SUBTITLE_PROBE_MS = 5000;
+    private static final long SUBTITLE_POLL_MS = 250;
+
+    /**
+     * Where the subtitle overlay sits. Two margins for two states: a normal TV
+     * subtitle position while the chrome is hidden, and raised clear of the two
+     * rows of chrome while it is showing, so the channel bar never covers the text.
+     * The chrome hides itself again after four seconds.
+     *
+     * Measured on the TV at density 320: the chrome's top edge is 292px above the
+     * bottom, so 140dp leaves the overlay 12px clear of it while the bar is up. With
+     * the bar away the overlay drops to 24dp, which is where subtitles belong.
+     */
+    private static final int SUBTITLE_MARGIN_IDLE_DP = 24;
+    private static final int SUBTITLE_MARGIN_CHROME_DP = 140;
+
+    /** Subtitle text size. 26sp is 85% of the 30sp this started at. */
+    private static final int SUBTITLE_TEXT_SP = 26;
 
     /**
      * Worth recording because it looks like it should work: libVLC does populate a
@@ -88,6 +122,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private HorizontalScrollView controlsScroll;
     private Button audioButton;
     private Button subsButton;
+    private TextView subtitleView;
+    private FrameLayout.LayoutParams subtitleParams;
 
     private final List<Channels.Channel> channels = new ArrayList<>();
     private final List<Button> buttons = new ArrayList<>();
@@ -100,6 +136,38 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      */
     private String[] sdtNames;
 
+    /**
+     * The subtitle pages each channel offers, by channel index, once discovered.
+     * Null per channel until the probe has read that channel's PMT, which is why
+     * the button says "scanning" rather than "off" while it is still looking.
+     */
+    private List<List<Teletext.Page>> teletextPages;
+
+    /** 0 is off; otherwise 1 + the index into this channel's page list. */
+    private int subsWanted;
+
+    /**
+     * The reader for the current channel, or null. Invariant: it is never left
+     * running for a channel that is no longer tuned, because a reader joins that
+     * channel's group.
+     */
+    private Teletext reader;
+    private Thread readerThread;
+
+    /**
+     * Bumped whenever the reader is started or stopped. The probe polls on the UI
+     * thread, and without this a poll that was already queued could stop a reader
+     * the viewer had started in the meantime - which would look like subtitles
+     * switching themselves off.
+     */
+    private int readerGeneration;
+    private boolean subtitleProbeRunning;
+
+    // Built in onCreate for the same reason as idleHide below: javac emits no
+    // enclosing-method for anonymous classes declared in a field initialiser, and
+    // d8 (R8 8.2.2, from build-tools 34) crashes on that with a null-name NPE.
+    private Teletext.Listener subtitleListener;
+
     private int current = -1;
 
     /**
@@ -108,7 +176,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * the ordering is the same on every channel here.
      */
     private int audioWanted;
-    private int spuWanted;
     private boolean applyWanted;
 
     /** Set once Playing has fired for the current tuning, cleared on every retune. */
@@ -142,6 +209,24 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             }
         };
 
+        // The reader calls this from its own thread, so the overlay is only ever
+        // touched on the UI thread. Lines are joined here rather than in the
+        // decoder because the TextView is the only thing that knows how they are
+        // laid out; an empty list means there is nothing to show, which is also
+        // what a subtitle page with no dialogue produces.
+        subtitleListener = new Teletext.Listener() {
+            @Override
+            public void onSubtitles(List<String> lines, String label) {
+                final List<String> copy = new ArrayList<>(lines);
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        showSubtitles(copy);
+                    }
+                });
+            }
+        };
+
         buildUi();
 
         channels.addAll(Channels.fromAssets(this, ASSET));
@@ -151,6 +236,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         }
         buildChannelBar();
         sdtNames = new String[channels.size()];
+        teletextPages = new ArrayList<>(channels.size());
+        for (int i = 0; i < channels.size(); i++) {
+            teletextPages.add(null);       // filled in by the probe, per channel
+        }
 
         ArrayList<String> options = new ArrayList<>();
         options.add("--network-caching=800");
@@ -210,6 +299,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         }
         // Stop rather than pause: this is what drops the multicast membership.
         player.stop();
+        // ...and the same for the teletext reader, which joins the same group.
+        stopReader();
         if (vout.areViewsAttached()) {
             vout.detachViews();
         }
@@ -220,6 +311,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     protected void onDestroy() {
         super.onDestroy();
         ui.removeCallbacks(idleHide);
+        stopReader();
         if (vout != null) {
             vout.removeCallback(this);
         }
@@ -254,12 +346,39 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         //     so this full-screen layer would otherwise black out the video.
         // Being a media overlay also keeps it below the window, so the channel bar
         // and the status card still draw over it.
+        // Nothing draws here any more: the app no longer selects a libVLC SPU track,
+        // because the subtitles are decoded by Teletext and drawn as text in the
+        // overlay below. Left in place rather than removed - it costs an empty
+        // transparent view, and taking it out would mean touching the attach/detach
+        // path that was just fixed.
         subtitlesSurface = new SurfaceView(this);
         subtitlesSurface.setZOrderMediaOverlay(true);
         subtitlesSurface.getHolder().setFormat(PixelFormat.TRANSLUCENT);
         root.addView(subtitlesSurface, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // The subtitle overlay. Added after the video surfaces so it draws over
+        // them, and before the card and the bar so those still draw over it: the
+        // chrome has to stay readable while subtitles are on.
+        subtitleView = new TextView(this);
+        subtitleView.setTextColor(Color.WHITE);
+        subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, SUBTITLE_TEXT_SP);
+        subtitleView.setLineSpacing(dp(4), 1.0f);
+        subtitleView.setGravity(Gravity.CENTER);
+        subtitleView.setPadding(dp(20), dp(10), dp(20), dp(10));
+        // Near-opaque rather than solid: white on black is what was asked for, and
+        // a hint of picture through the box keeps it from looking like a hole.
+        subtitleView.setBackgroundColor(0xE0000000);
+        subtitleView.setMaxWidth(dp(900));
+        applyReadingFont(subtitleView);
+        subtitleView.setVisibility(View.GONE);
+        subtitleParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT);
+        subtitleParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        placeSubtitles(false);
+        root.addView(subtitleView, subtitleParams);
 
         card = new TextView(this);
         card.setTextColor(Color.WHITE);
@@ -426,6 +545,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         card.setVisibility(View.VISIBLE);
         controlsScroll.setVisibility(View.VISIBLE);
         barScroll.setVisibility(View.VISIBLE);
+        placeSubtitles(true);
         restartIdleTimer();
     }
 
@@ -443,7 +563,24 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         controlsScroll.setVisibility(View.GONE);
         barScroll.setVisibility(View.GONE);
         card.setVisibility(View.GONE);
+        placeSubtitles(false);
         surface.requestFocus();
+    }
+
+    /**
+     * Moves the subtitles out of the chrome's way only while the chrome is up. With
+     * the bar hidden they sit where a viewer expects subtitles to sit, rather than
+     * floating a fifth of the screen above the bottom for no reason.
+     */
+    private void placeSubtitles(boolean chromeUp) {
+        if (subtitleParams == null) {
+            return;
+        }
+        int bottom = chromeUp ? SUBTITLE_MARGIN_CHROME_DP : SUBTITLE_MARGIN_IDLE_DP;
+        subtitleParams.setMargins(dp(32), 0, dp(32), dp(bottom));
+        if (subtitleView != null) {
+            subtitleView.setLayoutParams(subtitleParams);
+        }
     }
 
     private void restartIdleTimer() {
@@ -481,12 +618,19 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         updateBar();
         applyWanted = true;
         started = false;
-        // Subtitles start off on every channel. The audio choice is remembered,
-        // because AC-3 is a preference; a subtitle page is something you turn on
-        // for one programme, and carrying it to the next channel is just wrong.
-        spuWanted = 0;
+        // Subtitles start off on every channel, and any reader for the previous
+        // channel stops here. The audio choice is remembered, because AC-3 is a
+        // preference; a subtitle page is something you turn on for one programme,
+        // and the reader is joined to the group of the channel it was started for.
+        // The pages this channel offers are looked up in the background so the
+        // button can name them when it is pressed.
+        subsWanted = 0;
+        stopReader();
+        showSubtitles(Collections.<String>emptyList());
         updateTrackButtons();
         probeServiceName(index);
+        discoverSubtitlePages(index);
+        updateSubsButton();
 
         Media media = new Media(libVLC, Uri.parse(channel.url));
         media.setHWDecoderEnabled(true, false);
@@ -548,25 +692,39 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     // ---------------------------------------------------------------- the tracks
 
     /**
-     * Called whenever the track lists may have changed. Applies a remembered
-     * choice once per tuning, then refreshes the two control buttons.
+     * Called whenever the track lists may have changed. Applies a remembered audio
+     * choice once per tuning, then refreshes the control buttons.
+     *
+     * There is no subtitle half any more: the teletext pages are decoded by Teletext
+     * rather than by libVLC, so there is no SPU track to select - and selecting one
+     * as well would draw libVLC's teletext bitmap underneath our own text.
      */
     private void onTracksAvailable(String when) {
+        // Turn libVLC's own subtitle rendering off rather than merely not choosing a
+        // track: left alone it auto-selects one, and its teletext renderer then draws
+        // the grid as well as our overlay - two sets of subtitles, one of them the
+        // upscaled bitmap this whole rework exists to get rid of.
+        //
+        // Done before the audio check below, because this method is called on every
+        // ES event and the first of those arrives before the audio list is parsed.
+        // Disabling only once the audio is known left a window in which libVLC could
+        // pick a subtitle track, which is exactly what put its own text on screen
+        // under ours.
+        if (player.getSpuTrack() != -1) {
+            player.setSpuTrack(-1);
+            Log.i(TAG, "spu off: libVLC's teletext renderer is not used");
+        }
+
         List<MediaPlayer.TrackDescription> audio = audioTracks();
-        List<MediaPlayer.TrackDescription> spu = spuTracks();
-        if (audio.isEmpty() && spu.isEmpty()) {
+        if (audio.isEmpty()) {
             return;                     // nothing parsed yet
         }
 
         if (applyWanted) {
             applyWanted = false;
-            if (!audio.isEmpty() && audioWanted > 0) {
+            if (audioWanted > 0) {
                 player.setAudioTrack(audio.get(audioWanted % audio.size()).id);
                 Log.i(TAG, "applied audio ordinal " + audioWanted);
-            }
-            if (!spu.isEmpty() && spuWanted > 0) {
-                player.setSpuTrack(spu.get(spuWanted % spu.size()).id);
-                Log.i(TAG, "applied spu ordinal " + spuWanted);
             }
         }
 
@@ -576,35 +734,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     /** The selectable audio tracks: libVLC always offers "Disable" as id -1 first. */
     private List<MediaPlayer.TrackDescription> audioTracks() {
         return withoutDisable(player.getAudioTracks());
-    }
-
-    /**
-     * Subtitle tracks including "Disable", which is what "off" means here.
-     *
-     * The raw teletext entry is excluded: selecting it draws a whole teletext page
-     * over the picture, which is not something a button marked Subs should do, and
-     * it is also easy to leave on with no obvious way back. The subtitle pages are
-     * the entries libVLC names "Teletext subtitles". If a channel offers none, the
-     * full list is used rather than leaving the button with nothing to do.
-     */
-    private List<MediaPlayer.TrackDescription> spuTracks() {
-        List<MediaPlayer.TrackDescription> all = new ArrayList<>();
-        MediaPlayer.TrackDescription[] tracks = player.getSpuTracks();
-        if (tracks != null) {
-            for (MediaPlayer.TrackDescription track : tracks) {
-                if (track != null) {
-                    all.add(track);
-                }
-            }
-        }
-        List<MediaPlayer.TrackDescription> pages = new ArrayList<>();
-        for (MediaPlayer.TrackDescription track : all) {
-            if (track.id < 0 || (track.name != null
-                    && track.name.toLowerCase(Locale.ROOT).contains("subtitle"))) {
-                pages.add(track);
-            }
-        }
-        return pages.size() > 1 ? pages : all;
     }
 
     private static List<MediaPlayer.TrackDescription> withoutDisable(
@@ -632,18 +761,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         restartIdleTimer();
     }
 
-    private void cycleSubs() {
-        List<MediaPlayer.TrackDescription> spu = spuTracks();
-        if (spu.isEmpty()) {
-            return;
-        }
-        spuWanted = (spuWanted + 1) % spu.size();
-        player.setSpuTrack(spu.get(spuWanted).id);
-        Log.i(TAG, "spu -> ordinal " + spuWanted + " id " + spu.get(spuWanted).id);
-        updateTrackButtons();
-        restartIdleTimer();
-    }
-
     private void updateTrackButtons() {
         if (audioButton == null) {
             return;
@@ -665,16 +782,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                     + (audio.size() > 1 ? "  (" + (index + 1) + "/" + audio.size() + ")" : ""));
         }
 
-        List<MediaPlayer.TrackDescription> spu = spuTracks();
-        int spuId = player.getSpuTrack();
-        String spuLabel = "off";
-        for (MediaPlayer.TrackDescription track : spu) {
-            if (track.id == spuId && track.id >= 0) {
-                spuLabel = shortTrackName(track.name);
-                break;
-            }
-        }
-        subsButton.setText("Subs: " + spuLabel);
+        // The subtitle button is not derived from libVLC's tracks: the pages come
+        // from the stream via Teletext, so it is refreshed from there.
+        updateSubsButton();
     }
 
     /**
@@ -745,57 +855,208 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         return new String(out);
     }
 
+    // -------------------------------------------------------------- subtitles
+
     /**
-     * Shorten what libVLC reports for the teletext pages, e.g.
-     * "Teletext subtitles: hearing impaired - [Swedish]" -> "Subs HI (swe)".
-     * The pages look near-identical otherwise, and on SVT1 one of them is Danish,
-     * so the language has to stay visible.
+     * The subtitle overlay: the text the viewer reads.
+     *
+     * libVLC's own teletext decoder renders a 40x25 character grid scaled up to the
+     * panel, which is legible but rough; Teletext decodes the same pages so they can
+     * be drawn as text in a reading font instead.
+     *
+     * The reader joins the group the player is already playing, so it adds no
+     * bandwidth - but it is a second socket and a second thread, and it is therefore
+     * only running while a page is selected, or for the short probe that finds out
+     * which pages exist. Stopped on OFF, on a retune and in onStop, for the same
+     * reason the player is stopped there: nothing should be left pulling the group.
      */
-    private static String shortTrackName(String name) {
-        if (name == null || name.isEmpty()) {
-            return "(unnamed)";
+    private void showSubtitles(List<String> lines) {
+        if (subtitleView == null) {
+            return;
         }
-        String label = name;
-        String language = "";
-        int bracket = name.lastIndexOf('[');
-        if (bracket >= 0) {
-            int end = name.indexOf(']', bracket);
-            if (end > bracket) {
-                language = name.substring(bracket + 1, end).trim();
-                label = name.substring(0, bracket).trim();
+        // A reader that is being stopped can still deliver one last page, and
+        // subtitles the viewer switched off must not come back because of it. An
+        // empty list is also the normal case for a page whose programme has no
+        // dialogue, where the correct picture is no subtitles at all.
+        if (subsWanted == 0 || lines == null || lines.isEmpty()) {
+            subtitleView.setVisibility(View.GONE);
+            return;
+        }
+        StringBuilder text = new StringBuilder();
+        for (String line : lines) {
+            if (text.length() > 0) {
+                text.append('\n');
             }
+            text.append(line);
         }
-        if (label.endsWith("-")) {
-            label = label.substring(0, label.length() - 1).trim();
-        }
-        // libVLC's names are descriptive but far too long for a button, and the
-        // three pages differ only in these words. "Teletext" on its own is the
-        // decoder, i.e. the page you get rather than a subtitle stream.
-        if (label.equals("Teletext subtitles: hearing impaired")) {
-            label = "Subs HI";
-        } else if (label.startsWith("Teletext subtitles")) {
-            label = "Subs";
-        }
-        if (!language.isEmpty()) {
-            label = label + " (" + shortLanguage(language) + ")";
-        }
-        return label;
+        subtitleView.setText(text.toString());
+        subtitleView.setVisibility(View.VISIBLE);
     }
 
-    private static String shortLanguage(String language) {
-        if (language.startsWith("Swedish")) {
-            return "swe";
+    /**
+     * Literata, from assets/fonts/literata.ttf. It is a variable font (opsz,wght) and
+     * createFromAsset uses its default instance, which is Regular - the weight
+     * wanted for subtitles.
+     *
+     * Guarded because it is an asset lookup: a font that failed to be staged into
+     * the apk should cost the reading font, not the app.
+     */
+    private void applyReadingFont(TextView view) {
+        try {
+            Typeface literata = Typeface.createFromAsset(getAssets(), "fonts/literata.ttf");
+            if (literata != null) {
+                view.setTypeface(literata);
+            }
+        } catch (Exception e) {
+            Log.i(TAG, "literata not staged, using the system font (" + e + ")");
         }
-        if (language.startsWith("Danish")) {
-            return "dan";
+    }
+
+    private List<Teletext.Page> pagesFor(int index) {
+        if (teletextPages == null || index < 0 || index >= teletextPages.size()) {
+            return Collections.emptyList();
         }
-        if (language.startsWith("Norwegian")) {
-            return "nor";
+        List<Teletext.Page> pages = teletextPages.get(index);
+        return pages == null ? Collections.emptyList() : pages;
+    }
+
+    /** Starts a reader for one channel, following a page straight away unless null. */
+    private void startReader(int index, Teletext.Page page) {
+        stopReader();
+        Channels.Channel channel = channels.get(index);
+        Teletext teletext = new Teletext(channel.group(), channel.port(), subtitleListener);
+        if (page != null) {
+            teletext.select(page);
         }
-        if (language.startsWith("Finnish")) {
-            return "fin";
+        reader = teletext;
+        readerGeneration++;
+        readerThread = new Thread(teletext, "teletext-" + (index + 1));
+        readerThread.start();
+    }
+
+    private void stopReader() {
+        readerGeneration++;             // any poll still queued from it is now stale
+        subtitleProbeRunning = false;
+        if (reader != null) {
+            reader.stop();
+            reader = null;
+            readerThread = null;
         }
-        return language;
+    }
+
+    /**
+     * Finds out which subtitle pages this channel offers, and optionally starts
+     * following the first of them.
+     *
+     * The pages are listed in the stream's PMT, so finding them means reading the
+     * transport stream once. Doing that only on demand would leave the button unable
+     * to name anything on the first press, so this runs once per channel while it is
+     * tuned and then stops. A page selected while it is still running reuses the same
+     * reader, which is already parsing the tables it needs.
+     *
+     * Best effort by design: a channel that offers no subtitle pages simply leaves
+     * the button saying off, which is what that channel deserves. A later press looks
+     * again, so a channel that gains subtitle pages mid-session is picked up without
+     * restarting the app.
+     */
+    private void discoverSubtitlePages(final int index) {
+        if (teletextPages == null || index < 0 || index >= teletextPages.size()) {
+            return;
+        }
+        if (teletextPages.get(index) != null) {
+            return;                     // this channel's pages are already known
+        }
+        if (subtitleProbeRunning && index == current) {
+            return;                     // already looking; the poll will report
+        }
+
+        startReader(index, null);
+        subtitleProbeRunning = true;
+        final Teletext probe = reader;
+        final int generation = readerGeneration;
+        final long deadline = System.currentTimeMillis() + SUBTITLE_PROBE_MS;
+
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                if (generation != readerGeneration || probe != reader) {
+                    return;             // superseded by a selection, a retune or onStop
+                }
+                List<Teletext.Page> found = probe.pages();
+                if (!found.isEmpty()) {
+                    teletextPages.set(index, new ArrayList<>(found));
+                    Log.i(TAG, "teletext: channel " + (index + 1) + " offers "
+                            + found.size() + " subtitle pages");
+                    subtitleProbeRunning = false;
+                    stopReader();
+                    updateSubsButton();
+                    return;
+                }
+                if (System.currentTimeMillis() >= deadline) {
+                    Log.i(TAG, "teletext: channel " + (index + 1) + " gave no subtitle pages in "
+                            + (SUBTITLE_PROBE_MS / 1000) + "s");
+                    stopReader();
+                    updateSubsButton();
+                    return;
+                }
+                ui.postDelayed(this, SUBTITLE_POLL_MS);
+            }
+        });
+    }
+
+    /**
+     * OFF, then each subtitle page this channel offers, then OFF again.
+     *
+     * Selecting a page is what starts the reader; OFF stops it and hides the
+     * overlay. Pressing before the probe has finished is handled rather than
+     * ignored: the first page is followed as soon as the stream names its pages.
+     */
+    private void cycleSubs() {
+        List<Teletext.Page> pages = pagesFor(current);
+        if (pages.isEmpty()) {
+            // Nothing to cycle yet. Deliberately does not start following a page: the
+            // only thing that may turn subtitles on is a viewer asking for a page that
+            // is on offer, and the button already says "(scanning)" until then.
+            Log.i(TAG, "teletext: still looking for this channel's pages");
+            restartIdleTimer();
+            return;
+        }
+        subsWanted = (subsWanted + 1) % (pages.size() + 1);
+        if (subsWanted == 0) {
+            stopReader();
+            showSubtitles(Collections.<String>emptyList());
+            Log.i(TAG, "teletext: off");
+        } else {
+            Teletext.Page page = pages.get(subsWanted - 1);
+            if (reader != null) {
+                // A reader for this channel is already up - either the probe or one
+                // already following a page - so this only changes its page.
+                reader.select(page);
+            } else {
+                startReader(current, page);
+            }
+            Log.i(TAG, "teletext: page " + page.full() + " (" + page.label() + ")");
+        }
+        updateSubsButton();
+        restartIdleTimer();
+    }
+
+    /** Names the page the way the Audio button names its track. */
+    private void updateSubsButton() {
+        if (subsButton == null) {
+            return;
+        }
+        List<Teletext.Page> pages = pagesFor(current);
+        String label;
+        if (pages.isEmpty()) {
+            label = subtitleProbeRunning ? "off  (scanning)" : "off";
+        } else if (subsWanted <= 0 || subsWanted > pages.size()) {
+            label = "off  (0/" + pages.size() + ")";
+        } else {
+            label = pages.get(subsWanted - 1).label()
+                    + "  (" + subsWanted + "/" + pages.size() + ")";
+        }
+        subsButton.setText("Subs: " + label);
     }
 
     // --------------------------------------------------------------- multicast

@@ -240,7 +240,21 @@ final class Teletext implements Runnable {
         return carry;
     }
 
-    /** Splits the byte stream into EN 300 472 data units, carrying split ones over. */
+    /**
+     * Splits the byte stream into EN 300 472 data units, carrying split ones over.
+     *
+     * The resynchronisation is the whole point of the framing-code test. A socket
+     * joins in the middle of a PES, so the first bytes it ever sees are the middle
+     * of a data unit, and every PES payload then begins with the 0x10 data
+     * identifier rather than a unit. A walker that trusts its own alignment stays
+     * misaligned for the life of the socket and decodes nothing at all - while the
+     * PAT and PMT keep parsing perfectly, because they do not use this walk. That
+     * failure looks exactly like "the stream carries no pages".
+     *
+     * So a unit is only believed when its id is one of the two teletext ids, its
+     * length is at least a teletext row, and the 0xE4 framing code sits where the
+     * layout says it must. Anything else advances one byte and tries again.
+     */
     private byte[] units(byte[] payload, byte[] carry) {
         byte[] joined = new byte[carry.length + payload.length];
         System.arraycopy(carry, 0, joined, 0, carry.length);
@@ -250,12 +264,15 @@ final class Teletext implements Runnable {
         while (at + 2 <= joined.length) {
             int id = joined[at] & 0xff;
             int unitLength = joined[at + 1] & 0xff;
-            if (unitLength == 0 || at + 2 + unitLength > joined.length) {
-                break;
+            boolean unit = (id == DATA_UNIT_TELETEXT || id == DATA_UNIT_SUBTITLE)
+                    && unitLength >= 44
+                    && at + 2 + unitLength <= joined.length
+                    && (joined[at + 3] & 0xff) == TELETEXT_FRAMING;
+            if (!unit) {
+                at++;                   // resynchronise: the framing code is the anchor
+                continue;
             }
-            if ((id == DATA_UNIT_TELETEXT || id == DATA_UNIT_SUBTITLE) && unitLength >= 44) {
-                decodeUnit(joined, at + 2, id == DATA_UNIT_SUBTITLE);
-            }
+            decodeUnit(joined, at + 2, id == DATA_UNIT_SUBTITLE);
             at += 2 + unitLength;
         }
         byte[] rest = new byte[joined.length - at];
@@ -306,15 +323,28 @@ final class Teletext implements Runnable {
             return;
         }
         int number = (tens & 0x0f) * 10 + (units & 0x0f);
-        if (page.number != number) {
-            return;
-        }
         synchronized (rows) {
-            if (assembling == page.full()) {
+            // A header for ANY page in this magazine ends whatever was being
+            // assembled. Rows belong to the header that introduced them, and this
+            // stream interleaves the pages of a magazine - so without this the rows
+            // of every page that followed the subtitle page were collected into it,
+            // and a subtitle page came out as the news index with the odd stray
+            // comma row.
+            boolean following = assembling == page.full();
+            if (following) {
                 publish(page);                      // the previous subtitle
             }
             java.util.Arrays.fill(rows, null);
-            assembling = page.full();
+            if (number == page.number) {
+                assembling = page.full();
+                if (!following) {
+                    // Once per run of this page, which is the deterministic answer to
+                    // "is the subtitle page being transmitted at all".
+                    Log.i(TAG, "teletext: page " + page.full() + " header");
+                }
+            } else {
+                assembling = -1;                    // not our page: ignore its rows
+            }
         }
     }
 
@@ -418,11 +448,16 @@ final class Teletext implements Runnable {
      * One teletext row: seven bits per byte plus odd parity, then the national
      * option subset. This is the Swedish/Finnish/Hungarian subset, which is the one
      * these channels use; control codes become spaces.
+     *
+     * The reversal matters as much here as it does for the addresses: the text bytes
+     * are bit-reversed on the wire like every other payload byte, and reading them
+     * unreversed yields letters that are almost-but-not-quite right - which is how
+     * this shipped once, as "OPPwG &'/" where the stream said "och sortera".
      */
     private static String text(byte[] data, int start, int length) {
         StringBuilder out = new StringBuilder(length);
         for (int i = 0; i < length && start + i < data.length; i++) {
-            int value = data[start + i] & 0x7f;
+            int value = REVERSED[data[start + i] & 0xff] & 0x7f;
             if (value < 0x20) {
                 out.append(' ');                    // colour and control codes
                 continue;
