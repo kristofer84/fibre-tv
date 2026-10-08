@@ -3,6 +3,7 @@ package net.xcds.iptv;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Color;
+import android.graphics.PixelFormat;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -228,10 +229,16 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 FrameLayout.LayoutParams.MATCH_PARENT));
 
         // Teletext renders into a layer of its own, above the video. VLC's own
-        // layout does the same thing, and without the media overlay the subtitles
-        // surface can end up behind the video surface and show nothing.
+        // layout does the same two things, and both matter:
+        //   setZOrderMediaOverlay - otherwise the subtitles layer can sit behind the
+        //     video surface and show nothing;
+        //   setFormat(TRANSLUCENT) - a SurfaceView's surface is opaque by default,
+        //     so this full-screen layer would otherwise black out the video.
+        // Being a media overlay also keeps it below the window, so the channel bar
+        // and the status card still draw over it.
         subtitlesSurface = new SurfaceView(this);
         subtitlesSurface.setZOrderMediaOverlay(true);
+        subtitlesSurface.getHolder().setFormat(PixelFormat.TRANSLUCENT);
         root.addView(subtitlesSurface, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT));
