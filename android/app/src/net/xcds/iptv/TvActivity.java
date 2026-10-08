@@ -156,8 +156,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private int readerGeneration;
     private boolean subtitleProbeRunning;
 
-    /** Set when the button is pressed before this channel's pages are known. */
-    private boolean selectFirstWhenFound;
+    /** TEMPORARY: whether the sample lines below are on screen. See showSampleSubtitles. */
+    private boolean sampleShown;
 
     // Built in onCreate for the same reason as idleHide below: javac emits no
     // enclosing-method for anonymous classes declared in a field initialiser, and
@@ -621,12 +621,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         // The pages this channel offers are looked up in the background so the
         // button can name them when it is pressed.
         subsWanted = 0;
-        selectFirstWhenFound = false;
         stopReader();
         showSubtitles(Collections.<String>emptyList());
         updateTrackButtons();
         probeServiceName(index);
-        discoverSubtitlePages(index, false);
+        discoverSubtitlePages(index);
         updateSubsButton();
 
         Media media = new Media(libVLC, Uri.parse(channel.url));
@@ -934,7 +933,6 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private void stopReader() {
         readerGeneration++;             // any poll still queued from it is now stale
         subtitleProbeRunning = false;
-        selectFirstWhenFound = false;
         if (reader != null) {
             reader.stop();
             reader = null;
@@ -957,7 +955,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * again, so a channel that gains subtitle pages mid-session is picked up without
      * restarting the app.
      */
-    private void discoverSubtitlePages(final int index, final boolean selectFirst) {
+    private void discoverSubtitlePages(final int index) {
         if (teletextPages == null || index < 0 || index >= teletextPages.size()) {
             return;
         }
@@ -965,18 +963,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return;                     // this channel's pages are already known
         }
         if (subtitleProbeRunning && index == current) {
-            // Already looking. Remember the request, so the poll that is already
-            // queued follows the first page when it finds the list.
-            selectFirstWhenFound |= selectFirst;
-            return;
+            return;                     // already looking; the poll will report
         }
 
         startReader(index, null);
-        // Set after startReader, not before: starting a reader stops whatever was
-        // running, and stopping is what clears this flag. Set first, it would be
-        // false again by the time the poll reads it, and the first press after a
-        // retune would do nothing at all - which is the whole point of the flag.
-        selectFirstWhenFound = selectFirst;
         subtitleProbeRunning = true;
         final Teletext probe = reader;
         final int generation = readerGeneration;
@@ -993,22 +983,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                     teletextPages.set(index, new ArrayList<>(found));
                     Log.i(TAG, "teletext: channel " + (index + 1) + " offers "
                             + found.size() + " subtitle pages");
-                    if (index != current) {
-                        stopReader();   // retuned away while this was in flight
-                        updateSubsButton();
-                        return;
-                    }
-                    boolean follow = selectFirstWhenFound;
-                    selectFirstWhenFound = false;
                     subtitleProbeRunning = false;
-                    if (follow) {
-                        subsWanted = 1;
-                        probe.select(found.get(0));
-                        Log.i(TAG, "teletext: page " + found.get(0).full()
-                                + " (" + found.get(0).label() + ")");
-                    } else {
-                        stopReader();
-                    }
+                    stopReader();
                     updateSubsButton();
                     return;
                 }
@@ -1025,6 +1001,29 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     /**
+     * TEMPORARY DIAGNOSTIC. Key 0 toggles two fixed lines through the same view the
+     * reader uses, so the font, the national characters, the size and the position can
+     * be checked while no channel is transmitting subtitle pages. It deliberately does
+     * not touch subsWanted: it is not a subtitle selection, and the state it leaves
+     * behind is "nothing selected".
+     */
+    private void showSampleSubtitles() {
+        if (subtitleView == null) {
+            return;
+        }
+        sampleShown = !sampleShown;
+        if (!sampleShown) {
+            subtitleView.setVisibility(View.GONE);
+            Log.i(TAG, "sample subtitles off (temporary diagnostic)");
+            return;
+        }
+        subtitleView.setText("S\u00e5 naturen kan repa sig, s\u00e4ger \u00c5ke \u00d6rn\n"
+                + "\u00c4r det h\u00e4r Literata? \u00c5\u00c4\u00d6 \u00e5\u00e4\u00f6 30sp");
+        subtitleView.setVisibility(View.VISIBLE);
+        Log.i(TAG, "sample subtitles on (temporary diagnostic)");
+    }
+
+    /**
      * OFF, then each subtitle page this channel offers, then OFF again.
      *
      * Selecting a page is what starts the reader; OFF stops it and hides the
@@ -1034,7 +1033,10 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private void cycleSubs() {
         List<Teletext.Page> pages = pagesFor(current);
         if (pages.isEmpty()) {
-            discoverSubtitlePages(current, true);
+            // Nothing to cycle yet. Deliberately does not start following a page: the
+            // only thing that may turn subtitles on is a viewer asking for a page that
+            // is on offer, and the button already says "(scanning)" until then.
+            Log.i(TAG, "teletext: still looking for this channel's pages");
             restartIdleTimer();
             return;
         }
@@ -1194,6 +1196,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             case KeyEvent.KEYCODE_CAPTIONS:
                 // Present on some remotes; toggles subtitles without the bar.
                 cycleSubs();
+                return true;
+
+            case KeyEvent.KEYCODE_0:
+                // TEMPORARY DIAGNOSTIC, requested so the overlay can be looked at
+                // without waiting for a programme that is transmitting subtitles.
+                // Removable: delete this case and showSampleSubtitles().
+                showSampleSubtitles();
+                restartIdleTimer();
                 return true;
 
             case KeyEvent.KEYCODE_BACK:
