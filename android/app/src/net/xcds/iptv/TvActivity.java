@@ -78,6 +78,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     /** Highest meta id worth probing when logging; libvlc defines about 17. */
     private static final int META_MAX = 20;
 
+    /**
+     * How long after Playing to look for the SDT service name again. The SDT is
+     * periodic in the transport stream (every 0.5-2 s) and Playing can fire before
+     * the demuxer has parsed it, so a single read at Playing would make a null
+     * title indistinguishable from libVLC never exposing the SDT at all.
+     */
+    private static final long META_RETRY_MS = 3000;
+
     private LibVLC libVLC;
     private MediaPlayer player;
     private IVLCVout vout;
@@ -126,6 +134,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     // emits no enclosing-method for anonymous classes declared in an initialiser,
     // and d8 (R8 8.2.2, from build-tools 34) crashes on that with a null-name NPE.
     private Runnable idleHide;
+    private Runnable metaRetry;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -142,6 +151,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                     return;                 // in use; hiding it would kill the D-pad
                 }
                 hideChrome();
+            }
+        };
+
+        metaRetry = new Runnable() {
+            @Override
+            public void run() {
+                logMediaMetas();
+                readServiceName();
             }
         };
 
@@ -223,6 +240,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     protected void onDestroy() {
         super.onDestroy();
         ui.removeCallbacks(idleHide);
+        ui.removeCallbacks(metaRetry);
         if (vout != null) {
             vout.removeCallback(this);
         }
@@ -448,6 +466,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         Channels.Channel channel = channels.get(index);
 
         showCard(title() + "\njoining " + channel.group() + ", please wait");
+        ui.removeCallbacks(metaRetry);
         updateBar();
         applyWanted = true;
         started = false;
@@ -481,6 +500,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 showCard(title());
                 restartIdleTimer();
                 onTracksAvailable("playing");
+                // See META_RETRY_MS: one more look once the SDT should have arrived.
+                ui.removeCallbacks(metaRetry);
+                ui.postDelayed(metaRetry, META_RETRY_MS);
                 break;
             case MediaPlayer.Event.Opening:
                 showCard(title() + "\njoining, please wait");
