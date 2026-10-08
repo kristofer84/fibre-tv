@@ -90,9 +90,16 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * subtitle position while the chrome is hidden, and raised clear of the two
      * rows of chrome while it is showing, so the channel bar never covers the text.
      * The chrome hides itself again after four seconds.
+     *
+     * Measured on the TV at density 320: the chrome's top edge is 292px above the
+     * bottom, so 140dp leaves the overlay 12px clear of it while the bar is up. With
+     * the bar away the overlay drops to 24dp, which is where subtitles belong.
      */
-    private static final int SUBTITLE_MARGIN_IDLE_DP = 56;
+    private static final int SUBTITLE_MARGIN_IDLE_DP = 24;
     private static final int SUBTITLE_MARGIN_CHROME_DP = 140;
+
+    /** Subtitle text size. 26sp is 85% of the 30sp this started at. */
+    private static final int SUBTITLE_TEXT_SP = 26;
 
     /**
      * Worth recording because it looks like it should work: libVLC does populate a
@@ -359,7 +366,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         // chrome has to stay readable while subtitles are on.
         subtitleView = new TextView(this);
         subtitleView.setTextColor(Color.WHITE);
-        subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
+        subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, SUBTITLE_TEXT_SP);
         subtitleView.setLineSpacing(dp(4), 1.0f);
         subtitleView.setGravity(Gravity.CENTER);
         subtitleView.setPadding(dp(20), dp(10), dp(20), dp(10));
