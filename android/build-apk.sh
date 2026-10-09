@@ -131,7 +131,7 @@ if [ ! -s "$KEYSTORE" ]; then
     keytool -genkeypair -keystore "$KEYSTORE" -storetype pkcs12 \
         -alias "$KEY_ALIAS" -keyalg RSA -keysize 2048 -validity 10000 \
         -storepass "$KEYSTORE_PASSWORD" -keypass "$KEY_PASSWORD" \
-        -dname "CN=the operator IPTV TV app, O=local, C=SE"
+        -dname "CN=Fibre TV, O=local, C=SE"
 fi
 apksigner sign --ks "$KEYSTORE" --ks-key-alias "$KEY_ALIAS" \
     --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" \

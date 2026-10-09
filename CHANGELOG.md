@@ -3,6 +3,24 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.12
+
+A clean sheet, and a new key to go with it.
+
+- **The public repository no longer contains the playlists, in any commit.** `channels.m3u8` and
+  `channels-vpn.m3u8` are removed from the history, and the operator is no longer named in any file
+  *or any commit message* - the history was rewritten rather than merely appended to, and force-pushed.
+- **A new signing certificate**, `CN=Fibre TV, O=local, C=SE`, replacing one whose distinguished name
+  carried the former product name. The earlier releases and their tags are deleted.
+- **This breaks in-place updates for anything already installed.** Android refuses an update signed by a
+  different key, so an install of 1.11 or earlier - on a TV or a phone - has to be uninstalled and
+  installed afresh, and the app's own storage goes with it: profiles and their imported lists. Any list
+  kept outside the app can be imported again, and the app ships with none of its own.
+- Rewriting history is best-effort rather than absolute: the old commits are unreachable on GitHub after
+  the force-push, but they can persist in GitHub's own storage for a time and in existing clones, forks
+  and downloaded apks. Everything released up to 1.11 carries the seven channels inside its apk, and
+  whoever holds a copy holds that copy.
+
 ### 1.11
 
 The public side of this project is now the method rather than the inventory.
