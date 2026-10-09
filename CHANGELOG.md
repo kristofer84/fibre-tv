@@ -27,11 +27,24 @@ well": not a dialog, and not the chip row made stable, but one row per profile.
 - Deleting a profile nobody is watching does not re-tune the stream: the revision only changes when
   the active profile is the one that went away.
 
-Verified on the TV: rows of 44dp with 12dp gaps and no overlap at density 480 with font_scale 1.3;
-focus on open on the active row's name field; adding two profiles left the add row's bounds
-unchanged; renaming two rows and saving logged both renames and survived a restart with the row's
-name and its delete description agreeing; deleting an inactive profile took two taps, left the
-active profile alone, and logged no re-tune.
+- **Each row shows what its list is**: the channel count and where it came from - built-in, edited
+  on this device, or imported from a URL. The source was already stored per profile; with a list it
+  finally had somewhere to live, and it replaces what a single "List in use" line could only say
+  about one profile. A profile created from the built-in list stores no text of its own, so its
+  count reads the asset - without that it showed "0 channels" while the app played seven.
+- **Deleting the profile in use is a deliberate act with a named outcome.** The warning at the
+  point of decision names the profile that takes over, and the rule behind it lives in one place
+  (`Playlist.fallbackName`) so the warning cannot drift from what the delete does. The fallback is
+  the first remaining profile, and the last profile cannot be deleted at all.
+
+Verified on the TV: rows of 64dp for the two-line form with 12dp gaps and no overlap at density 480
+with font_scale 1.3; focus on open on the active row's name field; adding two profiles left the add
+row's bounds unchanged and kept the focus on it; renaming two rows and saving logged both renames and
+survived a restart with the row's name and its delete description agreeing; arming a delete on the
+profile in use named the fallback and the second tap logged `deleted Profile 2, now on LAN` with the
+marker and the focus both moving to LAN; arming the delete on the last profile logged `refused to
+delete the only profile` and left it in place; and a remote reaches the add row with two Ups from the
+active row's name, the first being consumed by the text field.
 
 ### 1.5
 
