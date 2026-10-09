@@ -169,6 +169,13 @@ So, for anything this project calls verified:
 
 - **Read the object, not the tree.** `git show <ref>:<path>` when the claim is about a commit, and
   `git merge-base --is-ancestor` rather than a remembered list of branches.
+- **A tag contains work if that work is an ancestor of it.** `git merge-base --is-ancestor <commit>
+  <tag>` answers that question; reading a ref, or remembering the order things were done in, answers a
+  different one. Ask the remote before believing a local ref.
+- **Check that the shipped artifact contains the change**, not only that the release claims it:
+  `aapt dump badging` for the label, `unzip -p <apk> classes.dex | strings` for a string the change
+  introduced, and the apk's own bundled `assets/channels.m3u8` for the playlist. A release that says it
+  has the work and one that can be shown to contain it are different claims.
 - **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
   never reads `group-title`, so that field is for other players, is only knowable by reading it.
 - **Name the instrument that produced the claim.** `aapt dump badging` for the packaged label - the
