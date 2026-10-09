@@ -180,10 +180,6 @@ So, for anything this project calls verified:
   the tagged tree as well, or the match is a coincidence rather than a comparison. A release that says
   it has the work and one that can be shown to contain it are different claims.
 
-Where a rule lives matters as much as what it says: **a rule about stale sources that sits in a chat log
-has the same disease it describes.** That is why these are written here, in the repository, beside the
-code they are about, and why the follow-ups that matter end up in a source comment rather than in a
-message. Knowledge in the code travels with the code.
 - **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
   never reads `group-title`, so that field is for other players, is only knowable by reading it.
 - **Name the instrument that produced the claim.** `aapt dump badging` for the packaged label - the
@@ -191,6 +187,11 @@ message. Knowledge in the code travels with the code.
   misleadingly. The apk's own `assets/channels.m3u8` for the playlist that ships. `git ls-remote` for
   what is on the remote. `keytool -printcert` for the signing identity. A number without its
   instrument is not evidence, it is a coincidence waiting to be believed.
+
+Where a rule lives matters as much as what it says: **a rule about stale sources that sits in a chat log
+has the same disease it describes.** That is why these are written here, in the repository, beside the
+code they are about, and why the follow-ups that matter end up in a source comment rather than in a
+message. Knowledge in the code travels with the code.
 
 ### Where the channel names come from
 
