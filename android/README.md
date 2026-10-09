@@ -1,4 +1,4 @@
-## the operator TV — Android TV app
+## Fibre TV — Android TV app
 
 A single-screen Android TV app that plays the seven channels in
 [`../channels.m3u8`](../channels.m3u8). Built for a Chromecast with Google TV;
@@ -246,7 +246,7 @@ adb install -r android/app/build/iptv-tv.apk
 
 Without adb, upload the apk somewhere the TV can reach (a GitHub release works)
 and use the *Downloader* app to fetch and install it. The app appears in the TV
-launcher as **the operator TV**.
+launcher as **Fibre TV**.
 
 Two things about installing on a real device:
 

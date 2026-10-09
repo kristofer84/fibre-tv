@@ -977,7 +977,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      */
     private String title() {
         if (current < 0 || current >= channels.size()) {
-            return "the operator TV";
+            return getString(R.string.app_name);
         }
         return (current + 1) + "   " + nameOf(current)
                 + "   (" + Playlist.activeName(this) + ")";

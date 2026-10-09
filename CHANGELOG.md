@@ -46,6 +46,12 @@ marker and the focus both moving to LAN; arming the delete on the last profile l
 delete the only profile` and left it in place; and a remote reaches the add row with two Ups from the
 active row's name, the first being consumed by the text field.
 
+- **Renamed to Fibre TV.** The app and the repository are now Fibre TV / `fibre-tv`. "the operator" stays
+  in the prose as a factual descriptor of whose line this was reverse-engineered from - the line, the
+  playlist header comments, the notes - and a not-affiliated notice now appears in the app's About
+  screen and in the README. The package name `net.xcds.iptv`, the apk file name and the signing key
+  are unchanged, so this installs as an update rather than as a different app.
+
 ### 1.5
 
 Three fixes from installing v1.4 on a phone, which lays the panel out at a different scale

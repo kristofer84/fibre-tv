@@ -58,7 +58,7 @@ public class AboutActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView title = new TextView(this);
-        title.setText("About the operator TV");
+        title.setText(R.string.about_name);
         title.setTextColor(Color.WHITE);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         root.addView(title);
@@ -69,6 +69,15 @@ public class AboutActivity extends Activity {
         version.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         version.setPadding(0, dp(4), 0, dp(12));
         root.addView(version);
+
+        // The notice comes before the licences, because it is about the app rather than about the
+        // code inside it, and because it is the sentence that must not be missed.
+        TextView notice = new TextView(this);
+        notice.setText(R.string.notice);
+        notice.setTextColor(0xFFB0BEC5);
+        notice.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        notice.setPadding(0, dp(12), 0, dp(12));
+        root.addView(notice);
 
         // One row per component with its text behind a Show button, rather than every licence
         // in one scroll: the point of the screen is what the apk carries and under which
