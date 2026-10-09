@@ -628,9 +628,7 @@ final class SettingsPanel {
             // line could only ever describe one profile, and with a list the obvious question about
             // a profile you are not using is what it holds and where it came from.
             TextView origin = new TextView(host);
-            int count = Playlist.channelCount(host, id);
-            origin.setText(count + (count == 1 ? " channel  ·  " : " channels  ·  ")
-                    + Playlist.sourceOf(host, id));
+            origin.setText(summary(id));
             origin.setTextColor(0xFF9E9E9E);
             origin.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
             origin.setSingleLine(true);
@@ -1003,6 +1001,35 @@ for (int i = 0; i < profileList.getChildCount(); i++) {
     }
 
     /** Caller is on the UI thread. */
+    /** The line that describes a profile: how much it holds and where that came from. */
+    private String summary(String id) {
+        int count = Playlist.channelCount(host, id);
+        return count + (count == 1 ? " channel  \u00b7  " : " channels  \u00b7  ")
+                + Playlist.sourceOf(host, id);
+    }
+
+    /**
+     * Refresh those summaries in place. An import changes the list under the profile, so the row
+     * describing it has to be told; rebuilding the rows would work but would lose the focus, and the
+     * viewer is in the middle of typing when an import lands.
+     */
+    private void refreshProfileSummaries() {
+        for (int i = 0; i < profileList.getChildCount(); i++) {
+            View row = profileList.getChildAt(i);
+            if (!(row instanceof LinearLayout) || !(row.getTag() instanceof String)) {
+                continue;
+            }
+            View lines = ((LinearLayout) row).getChildAt(0);
+            if (!(lines instanceof LinearLayout) || ((LinearLayout) lines).getChildCount() < 2) {
+                continue;
+            }
+            View origin = ((LinearLayout) lines).getChildAt(1);
+            if (origin instanceof TextView) {
+                ((TextView) origin).setText(summary((String) row.getTag()));
+            }
+        }
+    }
+
     private void applyImport(String url, String text) {
         if (text == null) {
             say("could not fetch that URL - nothing has changed (see the log)");
@@ -1020,6 +1047,7 @@ for (int i = 0; i < profileList.getChildCount(); i++) {
             return;
         }
         callback.settingsChanged();
+        refreshProfileSummaries();
         say("imported " + Playlist.describe(parsed.size()) + "; they are active now");
     }
 }

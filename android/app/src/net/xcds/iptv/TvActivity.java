@@ -403,7 +403,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         channels.addAll(Playlist.load(this, ASSET));
         loadedRevision = Playlist.revision(this);
         if (channels.isEmpty()) {
-            card.setText("no channels: fix the list in Settings");
+            // A fresh install has no list, and the chrome - the only route to Settings - cannot be
+            // focused into without a channel to focus on. So settings is not merely reachable here,
+            // it is where the app opens: the dead end is removed rather than pointed at.
+            card.setText("no channels: import a list in Settings");
+            startActivity(new Intent(this, SettingsActivity.class));
             return;
         }
         buildChannelBar();
@@ -448,6 +452,13 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     protected void onStart() {
         super.onStart();
         if (vout == null) {
+            // No player exists: the list was empty when this activity was created. If the settings
+            // screen has since given us one, start over rather than sitting on a screen that can
+            // never play. This is the other half of opening settings from here.
+            if (!Playlist.load(this, ASSET).isEmpty()) {
+                Log.i(TAG, "onStart: a list has appeared, starting over");
+                recreate();
+            }
             return;                     // channel list failed to load; nothing to play
         }
         // Re-set the view and only attach if not already attached. Without the
