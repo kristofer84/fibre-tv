@@ -3,6 +3,25 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.8
+
+The Info line's resolution is real now. It read a dash because libVLC reports nothing here -
+`getCurrentVideoTrack()` stays empty through a Vout view, and the media track table lists only the
+first audio elementary stream - so the number comes from the stream itself.
+
+- **A reader for the H.264 sequence parameter set**, beside the SDT and teletext readers and reading
+  the same transport stream through the same `Ts` seam. Additive: no new connection type, and the
+  device-verified video path is not involved.
+- **The cropped size is the displayed size.** A 1080p stream is coded as 1920x1088 and cropped by
+  eight lines, so ignoring `frame_cropping` reports 1920x1088 and is wrong - which is why TV4 is the
+  control worth having, alongside SVT1 at 1280x720.
+- **A dash until the probe lands, and a dash again on every channel change**, because showing the
+  previous channel's size would be the guess the dash exists to prevent. A parse that produces an
+  implausible size (outside 160-4096 by 120-2160) is discarded rather than displayed.
+- The value is **pixels** and is only ever formatted into a string. It must not reach a text size, a
+  padding or a layout parameter, where dp or sp would be meant - the units rule, on the one number
+  most likely to invite the mistake.
+
 ### 1.7
 
 One Down moves one channel. Every channel row held two D-pad focusable fields, so Down dropped into

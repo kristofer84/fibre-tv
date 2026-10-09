@@ -150,6 +150,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     /** The on-demand line: channel, resolution, bandwidth. Hidden until asked for. */
     private TextView infoView;
     private boolean infoShown;
+    /** The picture size as the stream reports it, or null until the probe has read it. */
+    private String videoSize;
     /** Bytes per second, from the watchdog's own samples - the one place this app measures traffic. */
     private long rxBytesPerSecond = -1;
     private long lastRx;
@@ -988,7 +990,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         updateTrackButtons();
         if (Ts.canSniff(channel.url)) {
             // A group to join or a relay to GET; Ts knows which and the sniffers do not care.
+            // A new channel starts from a dash: showing the previous channel's size while this one is
+            // being read would be exactly the guess the dash exists to avoid.
+            videoSize = null;
+            updateInfoLine();
             probeServiceName(index);
+            probeVideoSize(index);
             discoverSubtitlePages(index);
         } else {
             // One line per tune, rather than a silence that looks like a bug. Playback is
@@ -1301,6 +1308,37 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     /** Starts a reader for one channel, following a page straight away unless null. */
+    /**
+     * Ask the stream what size its picture is. Its own short read, beside the SDT probe: the two
+     * would otherwise serialise two timeouts on one thread, and on a relay each is a brief
+     * connection that closes as soon as it has an answer.
+     */
+    private void probeVideoSize(final int index) {
+        if (index < 0 || index >= channels.size()) {
+            return;
+        }
+        final Channels.Channel channel = channels.get(index);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String size = Sps.probe(channel.url, 4000);
+                if (size == null) {
+                    return;                                 // the line keeps its dash
+                }
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (index == current) {
+                            videoSize = size;
+                            Log.i(TAG, "video: channel " + (index + 1) + " is " + size);
+                            updateInfoLine();
+                        }
+                    }
+                });
+            }
+        }, "video-" + (index + 1)).start();
+    }
+
     private void startReader(int index, Teletext.Page page) {
         stopReader();
         Channels.Channel channel = channels.get(index);
@@ -1651,27 +1689,18 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * track table lists only the first audio elementary stream. It is consulted as a second opinion
      * because a wrong number would be worse than a dash.
      */
+    /**
+     * The picture size the stream reports, or a dash. It comes from Sps, which reads the H.264
+     * parameter set out of the same transport stream the SDT and teletext readers use, because
+     * libVLC reports nothing here: getCurrentVideoTrack() stays empty through a Vout view, and the
+     * media track table lists only the first audio elementary stream.
+     *
+     * A dash until the probe has landed. The value is pixels and is only ever formatted into this
+     * string - it must not reach a text size, a padding or a layout parameter, where dp or sp would
+     * be meant.
+     */
     private String resolution() {
-        if (player == null) {
-            return "\u2014";
-        }
-        // The media's track table, which is where the audio labels come from too. IMedia.VideoTrack
-        // carries width and height; libVLC fills it once the video is being decoded, and until then
-        // this shows a dash rather than a guess.
-        IMedia media = player.getMedia();
-        if (media != null) {
-            for (int i = 0; i < media.getTrackCount(); i++) {
-                IMedia.Track track = media.getTrack(i);
-                if (track != null && track.type == TRACK_TYPE_VIDEO
-                        && track instanceof IMedia.VideoTrack) {
-                    IMedia.VideoTrack video = (IMedia.VideoTrack) track;
-                    if (video.width > 0 && video.height > 0) {
-                        return video.width + "x" + video.height;
-                    }
-                }
-            }
-        }
-        return "\u2014";
+        return videoSize == null ? Sps.UNKNOWN : videoSize;
     }
 
     private String bitrate() {
