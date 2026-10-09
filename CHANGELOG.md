@@ -3,6 +3,29 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.7
+
+One Down moves one channel. Every channel row held two D-pad focusable fields, so Down dropped into
+text editing, where Down moves the caret - and the fields were unlabelled, which is why it read as "a
+strange text edit". The same trap sat one row up in the profile list.
+
+- **An Edit button per row**, in the same fixed-width action column the profile rows already used,
+  with Remove beside it at the same height. The row geometry does not change: Edit is 48dp and Remove
+  64dp inside the column Remove had to itself, and the dp conversion happens in one place.
+- **The fields are touch-only** while a row is collapsed - `setFocusable(false)` with
+  `setFocusableInTouchMode(true)`, deliberately not `setEnabled(false)`, which would grey the text and
+  kill tap-to-edit on a phone. So Down moves between rows, Edit is the row's only vertical focus stop,
+  and Right from Edit reaches Remove precisely because the fields are not focusable.
+- **Edit becomes Done at the same bounds**, that row's fields become focusable and labelled (`Name`,
+  `Stream URL`) and the focus moves into the name field; Done puts it all back. Same in-place
+  two-state pattern as the delete confirmation, so nothing moves under the finger.
+- **Remove now asks twice**: `Remove` -> `Tap again`. It is one press to the right of a focus stop and
+  destructive, so without the confirmation this change would have made an accidental deletion easier,
+  not only navigation faster.
+- **Profile rows get the same treatment**, since the profile name field had the same problem one row
+  up, and making it non-focusable without an Edit would have left Delete as the row's only stop.
+- The panel is still an overlay over the player, and the membership drop in `onStop` is untouched.
+
 ### 1.6
 
 The profile chips became a list. This is the answer to "the buttons could use another way to work as

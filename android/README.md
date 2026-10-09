@@ -56,9 +56,14 @@ In the panel:
   cannot push it down under the finger that just tapped it). The active profile is the row
   drawn with the accent chip - a view state rather than a mark in its name - and opening the
   panel puts the remote on that row's name field.
-- **Channels.** A name over its address, both editable, with `Remove` in its own
-  column. Nothing is applied until `Save`, deliberately: a half-typed address should
-  not retune the picture.
+- **Channels.** A name over its address, both editable, with `Edit` and `Remove` in the
+  row's own fixed-width column. The fields are touch-only until `Edit` is pressed, so the
+  D-pad's Down moves one channel at a time instead of dropping into text editing where
+  Down moves the caret; `Edit` is the row's only vertical focus stop and becomes `Done` in
+  place, which makes the row editable and labels the fields. `Remove` asks twice
+  (`Remove` -> `Tap again`) because it now sits one press to the right and is destructive.
+  Nothing is applied until `Save`, deliberately: a half-typed address should not retune
+  the picture. Tapping a field still edits it on a phone.
 - **Import a playlist.** Fetches an m3u from a URL. The status code is checked, the
   body is capped at 1 MB, and the text has to parse to at least one channel - which is
   what catches a URL that returns an HTML error page with a 200. A failure changes

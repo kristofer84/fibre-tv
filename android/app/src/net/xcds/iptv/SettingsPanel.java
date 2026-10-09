@@ -8,6 +8,7 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
@@ -66,6 +67,14 @@ final class SettingsPanel {
     /** The gap between rows in a block, in dp: a real gap, not a margin that happens to fit. */
     private static final int GAP_DP = 12;
 
+    /** The two per-row actions, sized so their column matches the width Remove had on its own. */
+    private static final int EDIT_ACTION_DP = 48;
+    private static final int REMOVE_ACTION_DP = 64;
+    private static final int ACTION_GAP_DP = 8;
+
+    private static final String NAME_HINT = "name";
+    private static final String URL_HINT = "rtp://@233.x.x.x:5500 or http://host:port/path";
+
     private final Activity host;
     private final Host callback;
 
@@ -74,8 +83,13 @@ final class SettingsPanel {
     private View firstControl;
     /** The profile rows: one per profile, with rename and delete on the row itself. */
     private LinearLayout profileList;
-    /** The delete button waiting for its second tap, if any. */
+    /** The armed button waiting for its second tap, if any, and the label it had before. */
     private Button armedButton;
+    private String armedNormalLabel = "Delete";
+    /** The Edit button of the row currently in edit mode, if any. */
+    private Button editingRow;
+    private EditText[] editingFields;
+    private String[] editingCollapsedHints;
     /** The add action, kept so focus can return to it: it is the row that never moves. */
     private Button newProfileButton;
     private TextView status;
@@ -100,6 +114,14 @@ final class SettingsPanel {
      * was never right for.
      */
     /** A row of a given dp height, for the rows that carry two lines. */
+    /** One action button in a row's right-hand column; the dp conversion happens here and nowhere else. */
+    private LinearLayout.LayoutParams actionParams(int widthDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                dp(widthDp), (int) host.getResources().getDimension(R.dimen.settings_field_height));
+        params.setMargins(dp(ACTION_GAP_DP), 0, 0, 0);
+        return params;
+    }
+
     private LinearLayout.LayoutParams rowParams(int gapDp, int heightDp) {
         LinearLayout.LayoutParams params = rowParams(gapDp);
         params.height = dp(heightDp);
@@ -182,7 +204,7 @@ final class SettingsPanel {
         newProfileButton = pill("New profile", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                cancelDelete();
+                cancelArmed();
                 String name = "Profile " + (Playlist.profileIds(host).size() + 1);
                 Playlist.createProfile(host, name, Playlist.buildM3U(rowsAsChannels()));
                 refresh();
@@ -213,8 +235,9 @@ final class SettingsPanel {
         actions.addView(pill("Add channel", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                EditText name = channelRow("", "");
-                name.requestFocus();
+                // The fields are touch-only when collapsed and this is the D-pad path, so the way
+                // into a new row is its own Edit button - the same one a viewer would press.
+                channelRow("", "").performClick();
                 say("add a name and an address, then Save");
             }
         }));
@@ -266,7 +289,7 @@ final class SettingsPanel {
         aboutRow.addView(pill("Reset to the built-in list", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                cancelDelete();
+                cancelArmed();
                 Playlist.reset(host);
                 refresh();
                 callback.settingsChanged();
@@ -406,7 +429,7 @@ final class SettingsPanel {
      * Remove in its own column so every row lines up. The name and the address are both editable,
      * which is why they are fields rather than text.
      */
-    private EditText channelRow(String name, String address) {
+    private Button channelRow(String name, String address) {
         LinearLayout row = new LinearLayout(host);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -420,14 +443,14 @@ final class SettingsPanel {
         // Explicit heights for the two lines: left to wrap, a field's own height plus the pill
         // padding made rows collide, which is what the first version of this looked like.
         final EditText nameField = new EditText(host);
-        field(nameField, "name", 16f);
+        field(nameField, NAME_HINT, 16f);
         nameField.setBackgroundResource(R.drawable.field_bg);
         nameField.setText(name);
         lines.addView(nameField, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(34)));
 
         final EditText addressField = new EditText(host);
-        field(addressField, "rtp://@233.x.x.x:5500 or http://host:port/path", 12f);
+        field(addressField, URL_HINT, 12f);
         addressField.setBackgroundResource(R.drawable.field_bg);
         addressField.setEllipsize(TextUtils.TruncateAt.MIDDLE);
         addressField.setInputType(InputType.TYPE_TEXT_VARIATION_URI);
@@ -437,22 +460,40 @@ final class SettingsPanel {
 
         row.addView(lines);
 
-        Button remove = pill("Remove", new View.OnClickListener() {
+        // The row's vertical focus stop is Edit. Right from it reaches Remove, and that is only true
+        // because the fields themselves are not focusable until this row is being edited - which is
+        // also what makes Down move one channel instead of dropping into a text field.
+        final Button edit = pill("Edit", null);
+        edit.setContentDescription("edit this channel");
+        edit.setLayoutParams(actionParams(EDIT_ACTION_DP));
+        row.addView(edit);
+
+        final Button remove = pill("Remove", null);
+        remove.setContentDescription("remove this channel");
+        remove.setLayoutParams(actionParams(REMOVE_ACTION_DP));
+        remove.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                if (armedButton != remove) {
+                    // One press to the right and destructive: without a confirmation this change
+                    // would make an accidental deletion easier, not merely navigation faster.
+                    armButton(remove, "Remove", "Tap again",
+                            "that will remove this channel from the list: "
+                                    + "tap again, or anything else to cancel");
+                    return;
+                }
+                cancelArmed();
                 rows.removeView(row);
                 say("removed a channel - press Save to keep it");
             }
         });
-        // A fixed column width, so Remove lines up down the list instead of drifting with the text.
-        LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(
-                dp(120), (int) host.getResources().getDimension(R.dimen.settings_field_height));
-        removeParams.setMargins(dp(8), 0, 0, 0);
-        remove.setLayoutParams(removeParams);
         row.addView(remove);
 
+        wireEditRow(edit, new EditText[] {nameField, addressField},
+                new String[] {NAME_HINT, URL_HINT}, new String[] {"Name", "Stream URL"});
+
         rows.addView(row);
-        return nameField;
+        return edit;
     }
 
     // --------------------------------------------------------------- the state
@@ -472,6 +513,7 @@ final class SettingsPanel {
     }
 
     private void loadRows(List<Channels.Channel> channels) {
+        forgetEditRow();
         rows.removeAllViews();
         for (Channels.Channel channel : channels) {
             channelRow(channel.name, channel.url);
@@ -495,7 +537,8 @@ final class SettingsPanel {
     private void fillProfileRows() {
         profileList.removeAllViews();
         firstControl = null;
-        cancelDelete();
+        forgetEditRow();
+        cancelArmed();
         for (final String id : Playlist.profileIds(host)) {
             final boolean active = id.equals(Playlist.activeId(host));
 
@@ -536,6 +579,11 @@ final class SettingsPanel {
             row.addView(lines, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
+            final Button edit = pill("Edit", null);
+            edit.setContentDescription("rename this profile");
+            edit.setLayoutParams(actionParams(EDIT_ACTION_DP));
+            row.addView(edit);
+
             final Button delete = pill("Delete", null);
             delete.setContentDescription("delete " + Playlist.profileName(host, id));
             delete.setOnClickListener(new View.OnClickListener() {
@@ -545,7 +593,7 @@ final class SettingsPanel {
                         armDelete(delete, id);
                         return;
                     }
-                    cancelDelete();
+                    cancelArmed();
                     String name = Playlist.profileName(host, id);
                     boolean deleted = Playlist.delete(host, id);
                     refresh();
@@ -560,41 +608,134 @@ final class SettingsPanel {
                     }
                 }
             });
-            LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(
-                    dp(120), (int) host.getResources().getDimension(R.dimen.settings_field_height));
-            deleteParams.setMargins(dp(8), 0, 0, 0);
-            row.addView(delete, deleteParams);
+            row.addView(delete, actionParams(REMOVE_ACTION_DP));
+
+            wireEditRow(edit, new EditText[] {name},
+                    new String[] {"profile name"}, new String[] {"Profile name"});
 
             // Two lines, so a height of its own - still fixed, so nothing can reflow it.
             profileList.addView(row, rowParams(GAP_DP, 64));
             if (active) {
-                firstControl = name;
+                // The name field is touch-only when collapsed, so the row's focus stop is Edit.
+                firstControl = edit;
             }
         }
     }
 
     /**
-     * Arm a row's delete: the label swaps rather than grows, in a column of fixed width, so nothing
-     * moves under the finger that is about to tap it a second time.
+     * Collapsed, a row's fields are touch-only: a tap edits them on a phone, but the D-pad cannot
+     * land in them, so Down moves between rows instead of dropping into text editing where Down
+     * moves the caret. Edit makes that row's fields focusable, puts the focus in the first one, and
+     * becomes Done at the same bounds - the same in-place two-state pattern the delete confirmation
+     * uses, and the reason the row's geometry never changes.
+     */
+    private void wireEditRow(final Button editButton, final EditText[] fields,
+                             final String[] collapsedHints, final String[] editHints) {
+        applyEditState(false, fields, collapsedHints, null);
+        // While a row is being edited the fields sit to the left of Done, but a text field swallows
+        // Right for the caret, so Done would be unreachable from a remote. Hand Right to the button
+        // ourselves, and only while this row is the one being edited.
+        final View.OnKeyListener toButton = new View.OnKeyListener() {
+            @Override
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                if (event.getAction() != KeyEvent.ACTION_DOWN || !editButton.isSelected()) {
+                    return false;
+                }
+                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    editButton.requestFocus();
+                    return true;
+                }
+                return false;
+            }
+        };
+        for (EditText field : fields) {
+            field.setOnKeyListener(toButton);
+        }
+        editButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                boolean wasEditing = editButton.isSelected();
+                if (!wasEditing && editingRow != null && editingRow != editButton) {
+                    collapseEditRow();                     // one editable row at a time
+                }
+                editButton.setSelected(!wasEditing);
+                editButton.setText(wasEditing ? "Edit" : "Done");
+                applyEditState(!wasEditing, fields, collapsedHints, editHints);
+                if (wasEditing) {
+                    editingRow = null;
+                    editingFields = null;
+                    editingCollapsedHints = null;
+                    editButton.requestFocus();             // never leave the focus nowhere
+                } else {
+                    editingRow = editButton;
+                    editingFields = fields;
+                    editingCollapsedHints = collapsedHints;
+                    fields[0].requestFocus();
+                }
+            }
+        });
+    }
+
+    /** Focusable only while its row is being edited; touch always. */
+    private void applyEditState(boolean editing, EditText[] fields, String[] hints, String[] editHints) {
+        for (int i = 0; i < fields.length; i++) {
+            fields[i].setFocusable(editing);
+            fields[i].setFocusableInTouchMode(true);
+            fields[i].setHint(editing && editHints != null ? editHints[i] : hints[i]);
+        }
+    }
+
+    /** Put the editing row back to collapsed. */
+    private void collapseEditRow() {
+        if (editingRow == null) {
+            return;
+        }
+        editingRow.setSelected(false);
+        editingRow.setText("Edit");
+        applyEditState(false, editingFields, editingCollapsedHints, null);
+        editingRow = null;
+        editingFields = null;
+        editingCollapsedHints = null;
+    }
+
+    /** Forget an editing row whose views are about to be thrown away. */
+    private void forgetEditRow() {
+        editingRow = null;
+        editingFields = null;
+        editingCollapsedHints = null;
+    }
+
+    /**
+     * Arm a button's second tap: the label swaps rather than grows, in a column of fixed width, so
+     * nothing moves under the finger that is about to tap it again.
+     */
+    private void armButton(Button button, String normalLabel, String armedLabel, String message) {
+        cancelArmed();
+        armedButton = button;
+        armedNormalLabel = normalLabel;
+        button.setText(armedLabel);
+        button.setSelected(true);                          // armed, drawn as the accent chip
+        say(message);
+    }
+
+    /**
+     * Arm a profile row's delete, naming what happens if it goes through. Deleting the profile in use
+     * is the case a list made newly reachable, so it says which one takes over rather than leaving the
+     * fallback to be discovered.
      */
     private void armDelete(Button button, String id) {
-        cancelDelete();
-        armedButton = button;
-        button.setText("Tap again");
-        button.setSelected(true);                       // armed, drawn as the accent chip
         boolean active = id.equals(Playlist.activeId(host));
-        say(active
-                // Deleting the profile in use is the case a list makes newly reachable, so it says
-                // what will happen rather than leaving the fallback to be discovered.
+        armButton(button, "Delete", "Tap again", active
                 ? "that will forget the list you are using and switch to "
                         + Playlist.fallbackName(host, id) + ": tap again, or anything else to cancel"
                 : "that will forget " + Playlist.profileName(host, id)
                         + "'s list: tap again, or anything else to cancel");
     }
 
-    private void cancelDelete() {
+    /** Disarm whatever was waiting for a second tap, putting its own label back. */
+    private void cancelArmed() {
         if (armedButton != null) {
-            armedButton.setText("Delete");
+            armedButton.setText(armedNormalLabel);
             armedButton.setSelected(false);
             armedButton = null;
         }
@@ -643,7 +784,7 @@ final class SettingsPanel {
     }
 
     private void save() {
-        cancelDelete();
+        cancelArmed();
         saveAudio();
         // Every row is renamed, not just the active one: the name is edited in the row.
         for (int i = 0; i < profileList.getChildCount(); i++) {
