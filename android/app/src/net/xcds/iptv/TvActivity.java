@@ -125,6 +125,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      */
 
     private LibVLC libVLC;
+
+    /** Whether the settings screen has already been offered for an empty list. */
+    private boolean offeredSettings;
     private MediaPlayer player;
     private IVLCVout vout;
 
@@ -403,11 +406,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         channels.addAll(Playlist.load(this, ASSET));
         loadedRevision = Playlist.revision(this);
         if (channels.isEmpty()) {
-            // A fresh install has no list, and the chrome - the only route to Settings - cannot be
-            // focused into without a channel to focus on. So settings is not merely reachable here,
-            // it is where the app opens: the dead end is removed rather than pointed at.
-            card.setText("no channels: import a list in Settings");
-            startActivity(new Intent(this, SettingsActivity.class));
+            // A fresh install has no list, and this is where it would be a dead end: the chrome
+            // cannot be focused into without a channel. See offerSettingsOrLeave.
+            offerSettingsOrLeave();
             return;
         }
         buildChannelBar();
@@ -448,6 +449,22 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         showCard(title() + "\nready");
     }
 
+    /**
+     * There is nothing to play. The chrome is the only route to Settings and it cannot be focused into
+     * without a channel, so an empty list would be a screen with no way forward. Offer settings once;
+     * if the viewer comes back with nothing still, leave rather than sit here.
+     */
+    private void offerSettingsOrLeave() {
+        if (!offeredSettings) {
+            offeredSettings = true;
+            card.setText("no channels: import a list in Settings");
+            startActivity(new Intent(this, SettingsActivity.class));
+        } else {
+            Log.i(TAG, "no list, and settings already offered: leaving");
+            finish();
+        }
+    }
+
     @Override
     protected void onStart() {
         super.onStart();
@@ -458,6 +475,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             if (!Playlist.load(this, ASSET).isEmpty()) {
                 Log.i(TAG, "onStart: a list has appeared, starting over");
                 recreate();
+            } else {
+                offerSettingsOrLeave();
             }
             return;                     // channel list failed to load; nothing to play
         }
@@ -476,6 +495,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         // the tune uses the new list rather than the indices from the old one.
         if (Playlist.revision(this) != loadedRevision) {
             reloadPlaylist();
+        }
+        if (channels.isEmpty()) {
+            // The list was emptied while the app was running - a reset to a built-in list that is no
+            // longer there, or every channel deleted. Same construction as anywhere else.
+            offerSettingsOrLeave();
+            return;
         }
         tune(current);
     }
@@ -782,8 +807,9 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         current = indexOfLastChannel();
         updateBar();
         Log.i(TAG, "playlist: reloaded, " + Playlist.describe(channels.size()));
+        offeredSettings = false;                    // a list arrived; the next empty spell offers again
         if (channels.isEmpty()) {
-            card.setText("no channels: fix the list in Settings");
+            card.setText("no channels: import a list in Settings");
         }
     }
 
