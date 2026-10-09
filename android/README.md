@@ -151,6 +151,27 @@ to the layout, not just to a version bump:
    `setMargins`, `setPadding` or a `LayoutParams`. This app runs on a phone and a television
    now, so "it looks right on the device I am holding" is not a check.
 
+### What counts as verified
+
+Three times in one day a check read the right number and the wrong thing, because its default
+answered a question about the *local view* when the question was about the *artefact*. A working tree
+on the wrong branch is indistinguishable to `grep`. A cached ref and a live branch are
+indistinguishable to a remembered `git branch -r`. A manifest that *references* a resource and the
+resource's *value* are indistinguishable to a search for the words. None of those is carelessness;
+each is a default pointing somewhere other than where the question was.
+
+So, for anything this project calls verified:
+
+- **Read the object, not the tree.** `git show <ref>:<path>` when the claim is about a commit, and
+  `git merge-base --is-ancestor` rather than a remembered list of branches.
+- **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
+  never reads `group-title`, so that field is for other players, is only knowable by reading it.
+- **Name the instrument that produced the claim.** `aapt dump badging` for the packaged label - the
+  manifest is binary AXML with UTF-16 strings, so a search for the text finds nothing and says so
+  misleadingly. The apk's own `assets/channels.m3u8` for the playlist that ships. `git ls-remote` for
+  what is on the remote. `keytool -printcert` for the signing identity. A number without its
+  instrument is not evidence, it is a coincidence waiting to be believed.
+
 ### Where the channel names come from
 
 The bar shows what each stream calls itself rather than what the playlist calls it:
