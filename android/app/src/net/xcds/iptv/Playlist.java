@@ -30,6 +30,9 @@ import java.util.List;
 final class Playlist {
 
     private static final String TAG = "iptv";
+
+    /** The list the app ships with, and the fallback when a profile stores no text of its own. */
+    static final String ASSET = "channels.m3u8";
     private static final String PREFS = "iptv";
     private static final String KEY_TEXT = "playlist_text";
     private static final String KEY_SOURCE = "playlist_source";
@@ -169,6 +172,20 @@ final class Playlist {
 
     /** Removes the active profile. Refuses to remove the last one: there is always a list. */
     /**
+     * Which profile would take over if this one were deleted: the same rule delete() applies, kept
+     * in one place so the warning the viewer reads cannot drift from what actually happens.
+     */
+    static String fallbackName(Context context, String id) {
+        ensureProfile(context);
+        for (String other : profileIds(context)) {
+            if (!other.equals(id)) {
+                return profileName(context, other);
+            }
+        }
+        return activeName(context);
+    }
+
+    /**
      * Delete one profile, active or not; refuses the last one. Deleting the active profile moves to
      * whichever is first, and only then does the revision change - deleting a profile nobody is
      * watching must not re-tune the stream.
@@ -278,6 +295,41 @@ final class Playlist {
         ensureProfile(context);
         String id = activeId(context);
         return id == null ? BUILT_IN : prefs(context).getString(keySource(id), BUILT_IN);
+    }
+
+    /**
+     * How many channels a profile's list holds, for the row that shows it.
+     *
+     * A profile created from the built-in list stores no text at all - its list is the asset, which
+     * is also why the app can still play it - so an empty text falls back to the asset rather than
+     * reporting zero. Reporting zero is what the first version of this did, and the built-in profile
+     * read "0 channels" while the app was playing seven of them.
+     */
+    static int channelCount(Context context, String id) {
+        String text = prefs(context).getString(keyText(id), null);
+        if (text == null || text.trim().isEmpty()) {
+            try {
+                return Channels.parse(context.getAssets().open(ASSET)).size();
+            } catch (IOException e) {
+                Log.i(TAG, "playlist: could not read the built-in list (" + e + ")");
+                return 0;
+            }
+        }
+        try {
+            return parseText(text).size();
+        } catch (RuntimeException e) {
+            Log.i(TAG, "playlist: could not count the channels of " + id + " (" + e + ")");
+            return 0;
+        }
+    }
+
+    /**
+     * Where one profile's list came from. Stored per profile already, which is why the panel can
+     * show it per row now that there is a row to show it in.
+     */
+    static String sourceOf(Context context, String id) {
+        String source = prefs(context).getString(keySource(id), null);
+        return source == null || source.trim().isEmpty() ? "not saved yet" : source;
     }
 
     static boolean save(Context context, String text, String source) {

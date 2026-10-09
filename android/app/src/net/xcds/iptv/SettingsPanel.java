@@ -53,7 +53,8 @@ final class SettingsPanel {
     }
 
     private static final String TAG = "iptv";
-    private static final String ASSET = "channels.m3u8";
+    /** The built-in list. Defined in Playlist, so the count and the loader cannot disagree. */
+    private static final String ASSET = Playlist.ASSET;
 
     /** Long enough for a slow link, short enough that a dead URL is not a hang. */
     private static final int CONNECT_TIMEOUT_MS = 10000;
@@ -75,6 +76,8 @@ final class SettingsPanel {
     private LinearLayout profileList;
     /** The delete button waiting for its second tap, if any. */
     private Button armedButton;
+    /** The add action, kept so focus can return to it: it is the row that never moves. */
+    private Button newProfileButton;
     private TextView status;
     private EditText delayField;
     private EditText trimFirstField;
@@ -96,6 +99,13 @@ final class SettingsPanel {
      * up underneath the field below them on a phone, at a density the 14dp margin they had been given
      * was never right for.
      */
+    /** A row of a given dp height, for the rows that carry two lines. */
+    private LinearLayout.LayoutParams rowParams(int gapDp, int heightDp) {
+        LinearLayout.LayoutParams params = rowParams(gapDp);
+        params.height = dp(heightDp);
+        return params;
+    }
+
     private LinearLayout.LayoutParams rowParams(int gapDp) {
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -169,7 +179,7 @@ final class SettingsPanel {
         LinearLayout profileActions = new LinearLayout(host);
         profileActions.setOrientation(LinearLayout.HORIZONTAL);
         profileActions.setGravity(Gravity.CENTER_VERTICAL);
-        profileActions.addView(pill("New profile", new View.OnClickListener() {
+        newProfileButton = pill("New profile", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 cancelDelete();
@@ -178,8 +188,13 @@ final class SettingsPanel {
                 refresh();
                 callback.settingsChanged();
                 say("created " + name + " as a copy of the list that was on screen");
+                // The rows were rebuilt, so whatever inside them had focus is gone. This button is
+                // the row that did not move, so it is where the focus belongs - on a remote and on a
+                // phone alike, it is what the viewer was pointing at.
+                newProfileButton.requestFocus();
             }
-        }));
+        });
+        profileActions.addView(newProfileButton);
         root.addView(profileActions, rowParams(GAP_DP));
 
         profileList = new LinearLayout(host);
@@ -492,12 +507,33 @@ final class SettingsPanel {
             row.setSelected(active);                    // the active marker, as a state
             row.setBackgroundResource(R.drawable.field_bg);
 
+            LinearLayout lines = new LinearLayout(host);
+            lines.setOrientation(LinearLayout.VERTICAL);
+
             EditText name = new EditText(host);
             field(name, "profile name", spOf(R.dimen.settings_text_size));
             name.setBackgroundResource(R.drawable.field_bg);
             name.setText(Playlist.profileName(host, id));
             name.setContentDescription(active ? "profile name, current profile" : "profile name");
-            row.addView(name, new LinearLayout.LayoutParams(
+            lines.addView(name, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(34)));
+
+            // Provenance, per row, now that there is a row to put it in: the single "List in use"
+            // line could only ever describe one profile, and with a list the obvious question about
+            // a profile you are not using is what it holds and where it came from.
+            TextView origin = new TextView(host);
+            int count = Playlist.channelCount(host, id);
+            origin.setText(count + (count == 1 ? " channel  ·  " : " channels  ·  ")
+                    + Playlist.sourceOf(host, id));
+            origin.setTextColor(0xFF9E9E9E);
+            origin.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+            origin.setSingleLine(true);
+            origin.setEllipsize(TextUtils.TruncateAt.END);
+            origin.setPadding(dp(10), 0, 0, 0);
+            lines.addView(origin, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(30)));
+
+            row.addView(lines, new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
 
             final Button delete = pill("Delete", null);
@@ -529,7 +565,8 @@ final class SettingsPanel {
             deleteParams.setMargins(dp(8), 0, 0, 0);
             row.addView(delete, deleteParams);
 
-            profileList.addView(row, rowParams(GAP_DP));
+            // Two lines, so a height of its own - still fixed, so nothing can reflow it.
+            profileList.addView(row, rowParams(GAP_DP, 64));
             if (active) {
                 firstControl = name;
             }
@@ -545,8 +582,14 @@ final class SettingsPanel {
         armedButton = button;
         button.setText("Tap again");
         button.setSelected(true);                       // armed, drawn as the accent chip
-        say("that will forget " + Playlist.profileName(host, id)
-                + "'s list: tap again, or anything else to cancel");
+        boolean active = id.equals(Playlist.activeId(host));
+        say(active
+                // Deleting the profile in use is the case a list makes newly reachable, so it says
+                // what will happen rather than leaving the fallback to be discovered.
+                ? "that will forget the list you are using and switch to "
+                        + Playlist.fallbackName(host, id) + ": tap again, or anything else to cancel"
+                : "that will forget " + Playlist.profileName(host, id)
+                        + "'s list: tap again, or anything else to cancel");
     }
 
     private void cancelDelete() {
