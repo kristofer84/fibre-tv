@@ -92,6 +92,8 @@ final class SettingsPanel {
     private String[] editingCollapsedHints;
     /** The add action, kept so focus can return to it: it is the row that never moves. */
     private Button newProfileButton;
+    /** The channel add action, for the same reason: focus has to land somewhere sane. */
+    private Button addChannelButton;
     private TextView status;
     private EditText delayField;
     private EditText trimFirstField;
@@ -232,7 +234,7 @@ final class SettingsPanel {
         LinearLayout actions = new LinearLayout(host);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setGravity(Gravity.CENTER_VERTICAL);
-        actions.addView(pill("Add channel", new View.OnClickListener() {
+        addChannelButton = pill("Add channel", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 // The fields are touch-only when collapsed and this is the D-pad path, so the way
@@ -240,7 +242,8 @@ final class SettingsPanel {
                 channelRow("", "").performClick();
                 say("add a name and an address, then Save");
             }
-        }));
+        });
+        actions.addView(addChannelButton);
         actions.addView(pill("Save", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -485,6 +488,9 @@ final class SettingsPanel {
                 cancelArmed();
                 rows.removeView(row);
                 say("removed a channel - press Save to keep it");
+                // The removed row held the focus, so it has to land somewhere deliberate rather than
+                // on the panel: this is the row that never moves, the same rule as the profile list.
+                addChannelButton.requestFocus();
             }
         });
         row.addView(remove);
@@ -507,6 +513,11 @@ final class SettingsPanel {
         trimFirstField.setText(String.valueOf(AudioTuning.trim(host, AudioTuning.FIRST)));
         trimSecondField.setText(String.valueOf(AudioTuning.trim(host, AudioTuning.SECOND)));
         trimOtherField.setText(String.valueOf(AudioTuning.trim(host, AudioTuning.OTHER)));
+        sayListInUse();
+    }
+
+    /** The panel's resting message, which the edit heading borrows and then gives back. */
+    private void sayListInUse() {
         String source = Playlist.source(host);
         say("List in use: " + source
                 + (Playlist.savedText(host) == null ? "" : "  (saved on this device)"));
@@ -629,6 +640,18 @@ final class SettingsPanel {
      * becomes Done at the same bounds - the same in-place two-state pattern the delete confirmation
      * uses, and the reason the row's geometry never changes.
      */
+    /** "Name / Stream URL" from the labels the row shows while editing. */
+    private static String joinLabels(String[] labels) {
+        StringBuilder out = new StringBuilder();
+        for (String label : labels) {
+            if (out.length() > 0) {
+                out.append(" / ");
+            }
+            out.append(label);
+        }
+        return out.toString();
+    }
+
     private void wireEditRow(final Button editButton, final EditText[] fields,
                              final String[] collapsedHints, final String[] editHints) {
         applyEditState(false, fields, collapsedHints, null);
@@ -665,12 +688,17 @@ final class SettingsPanel {
                     editingRow = null;
                     editingFields = null;
                     editingCollapsedHints = null;
+                    sayListInUse();
                     editButton.requestFocus();             // never leave the focus nowhere
                 } else {
                     editingRow = editButton;
                     editingFields = fields;
                     editingCollapsedHints = collapsedHints;
                     fields[0].requestFocus();
+                    // The heading: the panel's own message line, so it names what is being edited
+                    // without spending a single pixel of row geometry - which the row cannot afford,
+                    // being a fixed height on purpose. The per-field hints still cover a new row.
+                    say("Editing " + fields[0].getText() + " - " + joinLabels(editHints));
                 }
             }
         });
@@ -696,6 +724,7 @@ final class SettingsPanel {
         editingRow = null;
         editingFields = null;
         editingCollapsedHints = null;
+        sayListInUse();
     }
 
     /** Forget an editing row whose views are about to be thrown away. */

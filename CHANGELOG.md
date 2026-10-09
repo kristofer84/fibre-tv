@@ -22,6 +22,13 @@ strange text edit". The same trap sat one row up in the profile list.
 - **Remove now asks twice**: `Remove` -> `Tap again`. It is one press to the right of a focus stop and
   destructive, so without the confirmation this change would have made an accidental deletion easier,
   not only navigation faster.
+- **A heading while a row is being edited**, on the panel's own message line: `Editing SVT1 HD - Name /
+  Stream URL`. A hint cannot label a field that already has text, and a visible prefix would spend row
+  geometry - so the line that already exists does the job instead, and the hints stay for the empty
+  case, which is a freshly added row.
+- **Removing a channel parks the focus on Add channel** rather than dropping it onto the panel, the
+  same rule the profile list uses when a delete takes the focused row away.
+
 - **An Info line on demand**, over the picture: `SVT1 Stockholm HD - 1280x720 - 12.4 Mbit/s`.
   Toggled from a new Info button in the chrome - the D-pad route every remote has - and from the
   `KEYCODE_INFO` key where a remote carries one; the same toggle hides it. The **bandwidth** is the
