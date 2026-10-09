@@ -179,6 +179,11 @@ So, for anything this project calls verified:
   times proves little, because nothing identifies which occurrence is yours. Check the same string is in
   the tagged tree as well, or the match is a coincidence rather than a comparison. A release that says
   it has the work and one that can be shown to contain it are different claims.
+
+Where a rule lives matters as much as what it says: **a rule about stale sources that sits in a chat log
+has the same disease it describes.** That is why these are written here, in the repository, beside the
+code they are about, and why the follow-ups that matter end up in a source comment rather than in a
+message. Knowledge in the code travels with the code.
 - **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
   never reads `group-title`, so that field is for other players, is only knowable by reading it.
 - **Name the instrument that produced the claim.** `aapt dump badging` for the packaged label - the
