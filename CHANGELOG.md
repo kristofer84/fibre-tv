@@ -50,7 +50,10 @@ active row's name, the first being consumed by the text field.
   in the prose as a factual descriptor of whose line this was reverse-engineered from - the line, the
   playlist header comments, the notes - and a not-affiliated notice now appears in the app's About
   screen and in the README. The package name `net.xcds.iptv`, the apk file name and the signing key
-  are unchanged, so this installs as an update rather than as a different app.
+  are unchanged, so this installs as an update rather than as a different app. The signing
+  certificate also keeps its old distinguished name for that reason - a certificate-details view
+  is the one place the previous name still appears, and changing it would break every existing
+  install's update path.
 
 ### 1.5
 

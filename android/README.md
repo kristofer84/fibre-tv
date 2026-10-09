@@ -281,6 +281,13 @@ libVLC's aar ships no licence file of its own, which is why the text lives here
 and is copied in at build time. [THIRD-PARTY.md](THIRD-PARTY.md) covers the rest,
 including why dynamic linking satisfies the LGPL's relinking requirement.
 
+**Signing identity.** The certificate's distinguished name still reads
+`CN=the operator IPTV TV app`, and it stays that way on purpose: the key must not change, because
+every existing install verifies its updates against that certificate, and editing the name
+would mean generating a new one. It is the same distinction as the package name - identity
+that installs depend on, against naming that is free to change. Everything a user reads is
+Fibre TV.
+
 ### Verified on a Chromecast with Google TV (4K)
 
 Built, installed and run on a **Chromecast with Google TV (4K)**, Android 14,
