@@ -3,6 +3,20 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.13
+
+One more trace of the old name, in the artefact rather than the source.
+
+- The two lock tags the app registers - the `WifiManager` multicast and wifi locks - still carried the
+  app's former product name, so the shipped dex held it even after the resources and the history were
+  clean. They now use the package name, which is neutral and conventional.
+- **1.12 was published with that string in it and is replaced by this release**, rather than moving its
+  tag: a published tag that has been handed out should not be re-pointed.
+- How it was missed: the inventory pass that removed the name used a case-sensitive `grep` for the
+  capitalised spelling, so it never matched the lowercase lock tag. What caught it was a
+  case-*insensitive* check of the shipped dex - the artefact again, and an instrument whose default was
+  the opposite of the one that failed.
+
 ### 1.12
 
 A clean sheet, and a new key to go with it.

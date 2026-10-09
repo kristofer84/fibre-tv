@@ -1486,14 +1486,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return;                     // wired-only device; nothing to hold open
         }
         if (multicastLock == null) {
-            multicastLock = wifi.createMulticastLock("ownit-iptv");
+            multicastLock = wifi.createMulticastLock("net.xcds.iptv");
             multicastLock.setReferenceCounted(false);
         }
         if (!multicastLock.isHeld()) {
             multicastLock.acquire();
         }
         if (wifiLock == null) {
-            wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "ownit-iptv");
+            wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "net.xcds.iptv");
             wifiLock.setReferenceCounted(false);
         }
         if (!wifiLock.isHeld()) {
