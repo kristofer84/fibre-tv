@@ -816,21 +816,30 @@ final class SettingsPanel {
         cancelArmed();
         saveAudio();
         // Every row is renamed, not just the active one: the name is edited in the row.
-        for (int i = 0; i < profileList.getChildCount(); i++) {
-            View row = profileList.getChildAt(i);
-            if (!(row instanceof LinearLayout) || !(row.getTag() instanceof String)
-                    || ((LinearLayout) row).getChildCount() == 0) {
-                continue;
-            }
-            View first = ((LinearLayout) row).getChildAt(0);
-            if (!(first instanceof EditText)) {
-                continue;
-            }
-            Playlist.rename(host, (String) row.getTag(),
-                    ((EditText) first).getText().toString());
-        }
+for (int i = 0; i < profileList.getChildCount(); i++) {
+              View row = profileList.getChildAt(i);
+              if (!(row instanceof LinearLayout) || !(row.getTag() instanceof String)) {
+                  continue;
+              }
+              // The name field is inside the row's two-line container, not directly in the row: since
+              // the rows became name-over-provenance, child 0 is that container. Looking for an
+              // EditText there made every rename silently do nothing - exposed by a restart, and no
+              // amount of pressing Save would have fixed it.
+              View lines = ((LinearLayout) row).getChildAt(0);
+              if (!(lines instanceof LinearLayout) || ((LinearLayout) lines).getChildCount() == 0) {
+                  continue;
+              }
+              View nameField = ((LinearLayout) lines).getChildAt(0);
+              if (!(nameField instanceof EditText)) {
+                  continue;
+              }
+              Playlist.rename(host, (String) row.getTag(),
+                      ((EditText) nameField).getText().toString());
+          }
         String text = Playlist.buildM3U(rowsAsChannels());
-        if (Playlist.save(host, text, Playlist.EDITED)) {
+        // The list's own provenance, not "edited": saving must not relabel an imported list as
+        // hand-edited, which is what made an imported profile claim it had been edited here.
+        if (Playlist.save(host, text, Playlist.source(host))) {
             Log.i(TAG, "settings: saved");
             callback.settingsChanged();
             callback.closeSettings();
