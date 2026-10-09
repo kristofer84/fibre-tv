@@ -115,7 +115,8 @@ builds on an arm64 host:
 | `d8` | R8 from Google's Maven — a plain jar, so architecture-independent |
 | `javac`, `keytool`, `apksigner` | Java, so architecture-independent |
 
-Four traps are worth knowing about if you bump a version:
+Five traps are worth knowing about if you bump a version. The last one applies to any change
+to the layout, not just to a version bump:
 
 1. **Compile against API 34, not 35.** Debian's `aapt` is built from Android 14
    sources and cannot read the compact resource entries that API 35's
@@ -138,6 +139,14 @@ Four traps are worth knowing about if you bump a version:
    never loaded, so the missing type is never resolved at runtime. It cannot be
    pruned out either — libVLC's JNI looks its Java classes up by name, so
    tree-shaking the jar would break playback.
+5. **Every dimension that crosses a boundary has been bitten by its units.** Three times in
+   this app: a raw `sp` value passed where a dimension *resource id* was expected, which
+   crashed when settings was opened; a 14dp margin that was enough at density 320 and was not
+   enough at 480; and 12 pixels passed where 12dp was meant, which is a 4dp gap at 480 and
+   looked perfectly correct at 320. The rule that follows is cheap: name the helper for what it
+   takes (`dp(int dp)`), convert in exactly one place, and never let a bare number reach
+   `setMargins`, `setPadding` or a `LayoutParams`. This app runs on a phone and a television
+   now, so "it looks right on the device I am holding" is not a check.
 
 ### Where the channel names come from
 
