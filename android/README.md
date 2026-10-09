@@ -180,6 +180,12 @@ So, for anything this project calls verified:
   the tagged tree as well, or the match is a coincidence rather than a comparison. A release that says
   it has the work and one that can be shown to contain it are different claims.
 
+- **For anything about published history, clone it.** A local repository can be perfectly clean - files
+  deleted, history rewritten, `git log` showing nothing - while the remote still carries the old commits
+  through a stale branch that nobody merged or deleted. `git clone` from the remote is the instrument: it
+  shows what anyone else would get. This is the stale-ref fault one level out, and it is the only version
+  of it where the artefact *looks* right until the clone disagrees.
+
 - **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
   never reads `group-title`, so that field is for other players, is only knowable by reading it.
 - **An instrument pointed at a window answers a question about the window.** `uiautomator`'s dump
