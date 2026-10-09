@@ -1,7 +1,6 @@
 ## Fibre TV — Android TV app
 
-A single-screen Android TV app that plays the seven channels in
-[`../channels.m3u8`](../channels.m3u8). Built for a Chromecast with Google TV;
+A single-screen Android TV app that plays a channel list you supply. It ships with no channels,
 works on any Android TV or Fire TV device that is on the home LAN.
 
 The list is editable in the app and can be imported from a URL, several profiles can
@@ -11,8 +10,7 @@ play - see [Settings](#settings).
 
 It joins the multicast group itself with **libVLC** — the same engine, and the
 same `rtp://@group:port` URLs, that desktop VLC uses. So there is no relay, no
-HTTP hop, no HLS and no transcoding anywhere: `channels.m3u8` is the only source
-of truth, and it is staged into the apk at build time. A relay playlist (`http://…`)
+HTTP hop, no HLS and no transcoding anywhere: the list is imported in the app, and nothing is staged into the apk at build time. A relay playlist (`http://…`)
 is played by the same libVLC path.
 
 That is also what makes the audio work. The streams carry MP2 and AC3, which
@@ -341,7 +339,7 @@ and is copied in at build time. [THIRD-PARTY.md](THIRD-PARTY.md) covers the rest
 including why dynamic linking satisfies the LGPL's relinking requirement.
 
 **Signing identity.** The certificate's distinguished name still reads
-`CN=the operator IPTV TV app`, and it stays that way on purpose: the key must not change, because
+the app's former product name, and it stays that way on purpose: the key must not change, because
 every existing install verifies its updates against that certificate, and editing the name
 would mean generating a new one. It is the same distinction as the package name - identity
 that installs depend on, against naming that is free to change. Everything a user reads is

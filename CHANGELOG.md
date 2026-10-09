@@ -3,6 +3,22 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.11
+
+The public side of this project is now the method rather than the inventory.
+
+- **The app ships with no channel list.** `channels.m3u8` and `channels-vpn.m3u8` are no longer in the
+  repository, and no list is staged into the apk. The app starts empty, says so on the card, and the
+  Settings button opens the standalone settings screen - which is where a list is imported. Nothing new
+  was needed for that: an unreadable asset already meant an empty list and a message rather than a crash.
+  **Every release up to 1.10 still carries the seven channels**, and so does the git history; removing
+  them from either would mean rewriting history and deleting published apks.
+- **The operator is no longer named in this repository**, including the not-affiliated notice that named
+  them in order to disclaim them. One mention is kept deliberately: the signing certificate's
+  distinguished name still carries the app's former product name, because the key must not change -
+  every existing install verifies updates against that certificate - and the README explains it without
+  repeating the name.
+
 ### 1.10
 
 The Info line appears when it is asked for, not when the chrome happens to hide.

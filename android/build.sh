@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# Build the the operator IPTV Android TV app.
+# Build the Fibre TV IPTV Android TV app.
 #
 #   ./build.sh          -> app/build/iptv-tv.apk
 #   ./build.sh clean    -> throw away build output and toolchain archives
@@ -12,7 +12,7 @@
 set -eu
 cd "$(dirname "$0")"
 
-IMAGE=ownit-iptv-android-build
+IMAGE=fibre-tv-android-build
 CACHE=toolchain
 
 # Pinned. Changing a version here means changing nothing else - build-apk.sh only

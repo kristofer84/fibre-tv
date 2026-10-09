@@ -5,7 +5,4 @@
          on a television, from its own launcher entry. -->
     <string name="settings_name">Fibre TV settings</string>
     <string name="about_name">About Fibre TV</string>
-    <!-- The not-affiliated notice. One definition, because two copies of a legal sentence is one
-         copy too many: the About screen shows this, and the README quotes the same words. -->
-    <string name="notice">Fibre TV is an independent player for the free-to-air multicast channels on my own fibre line. It is not affiliated with, endorsed by, or supported by the operator or the operator. the operator appears only to say whose network this was reverse-engineered from. All trademarks belong to their respective owners.</string>
 </resources>

@@ -1,4 +1,4 @@
-# Build image for the the operator IPTV Android TV app.
+# Build image for the Fibre TV IPTV Android TV app.
 #
 # The point of this image is that the Android build needs exactly two tools that
 # are shipped as x86_64-only binaries, and this avoids both:

@@ -28,10 +28,6 @@ step() { printf '\n== %s\n' "$1"; }
 rm -rf "$BUILD"
 mkdir -p "$BUILD/tc" "$BUILD/gen" "$BUILD/classes" "$BUILD/dex" "$BUILD/assets"
 
-# Stage the channel list from the repository root: the one file in this project
-# that is also documentation, so it must not be duplicated here.
-cp channels.m3u8 "$BUILD/assets/channels.m3u8"
-
 # Licence texts travel inside the apk. libVLC is LGPL-2.1-or-later and its aar
 # ships no licence file, so distributing an apk means distributing the text.
 mkdir -p "$BUILD/assets/licenses"

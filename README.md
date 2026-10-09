@@ -1,13 +1,10 @@
 ## Fibre TV — the notes, and the app
 
-Notes on running an **the operator** (the operator Sverige) fibre TV subscription on my own
+Notes on running a fibre TV subscription on my own
 hardware (EdgeRouter X, Raspberry Pi, VLC) instead of the ISP's router and set-top box.
 Includes the channel list, which isn't published anywhere. There is also an Android app,
 **Fibre TV**, in [`android/`](android/README.md), which plays the same channels.
 
-### Not affiliated
-
-Fibre TV is an independent player for the free-to-air multicast channels on my own fibre line. It is not affiliated with, endorsed by, or supported by the operator or the operator. the operator appears only to say whose network this was reverse-engineered from. All trademarks belong to their respective owners.
 
 The most common pitfall: the router's IGMP proxy needs a VLAN interface as upstream,
 otherwise it fails silently. See [router.md](router.md).
