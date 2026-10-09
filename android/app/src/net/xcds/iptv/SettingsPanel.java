@@ -88,6 +88,8 @@ final class SettingsPanel {
     private String armedNormalLabel = "Delete";
     /** The Edit button of the row currently in edit mode, if any. */
     private Button editingRow;
+    /** Whether the fields of the row being edited are tap-editable when collapsed. */
+    private boolean editingTapEdits = true;
     private EditText[] editingFields;
     private String[] editingCollapsedHints;
     /** The add action, kept so focus can return to it: it is the row that never moves. */
@@ -496,7 +498,8 @@ final class SettingsPanel {
         row.addView(remove);
 
         wireEditRow(edit, new EditText[] {nameField, addressField},
-                new String[] {NAME_HINT, URL_HINT}, new String[] {"Name", "Stream URL"});
+                new String[] {NAME_HINT, URL_HINT}, new String[] {"Name", "Stream URL"},
+                true, null);
 
         rows.addView(row);
         return edit;
@@ -564,6 +567,55 @@ final class SettingsPanel {
             LinearLayout lines = new LinearLayout(host);
             lines.setOrientation(LinearLayout.VERTICAL);
 
+            // The row is the gesture. Tapping it - or selecting it with the D-pad and pressing centre -
+
+
+            // activates that profile. The name field is inert while collapsed, so a tap cannot fall into it.
+
+
+            row.setFocusable(true);
+
+
+            row.setOnClickListener(new View.OnClickListener() {
+
+
+                @Override
+
+
+                public void onClick(View v) {
+
+
+                    cancelArmed();
+
+
+                    if (id.equals(Playlist.activeId(host))) {
+
+
+                        return;                                     // already the one in use
+
+
+                    }
+
+
+                    Playlist.switchTo(host, id);
+
+
+                    refresh();
+
+
+                    callback.settingsChanged();
+
+
+                    say("profile " + Playlist.activeName(host) + " is now active");
+
+
+                }
+
+
+            });
+
+
+
             EditText name = new EditText(host);
             field(name, "profile name", spOf(R.dimen.settings_text_size));
             name.setBackgroundResource(R.drawable.field_bg);
@@ -622,7 +674,13 @@ final class SettingsPanel {
             row.addView(delete, actionParams(REMOVE_ACTION_DP));
 
             wireEditRow(edit, new EditText[] {name},
-                    new String[] {"profile name"}, new String[] {"Profile name"});
+                    new String[] {"profile name"}, new String[] {"Profile name"}, false,
+                    new Runnable() {
+                        @Override
+                        public void run() {
+                            Playlist.rename(host, id, name.getText().toString());
+                        }
+                    });
 
             // Two lines, so a height of its own - still fixed, so nothing can reflow it.
             profileList.addView(row, rowParams(GAP_DP, 64));
@@ -653,8 +711,9 @@ final class SettingsPanel {
     }
 
     private void wireEditRow(final Button editButton, final EditText[] fields,
-                             final String[] collapsedHints, final String[] editHints) {
-        applyEditState(false, fields, collapsedHints, null);
+                             final String[] collapsedHints, final String[] editHints,
+                             final boolean tapEditsWhenCollapsed, final Runnable onDone) {
+        applyEditState(false, fields, collapsedHints, null, tapEditsWhenCollapsed);
         // While a row is being edited the fields sit to the left of Done, but a text field swallows
         // Right for the caret, so Done would be unreachable from a remote. Hand Right to the button
         // ourselves, and only while this row is the one being edited.
@@ -683,7 +742,10 @@ final class SettingsPanel {
                 }
                 editButton.setSelected(!wasEditing);
                 editButton.setText(wasEditing ? "Edit" : "Done");
-                applyEditState(!wasEditing, fields, collapsedHints, editHints);
+                applyEditState(!wasEditing, fields, collapsedHints, editHints, tapEditsWhenCollapsed);
+                if (wasEditing && onDone != null) {
+                    onDone.run();                             // Done commits, so a rename sticks
+                }
                 if (wasEditing) {
                     editingRow = null;
                     editingFields = null;
@@ -694,6 +756,7 @@ final class SettingsPanel {
                     editingRow = editButton;
                     editingFields = fields;
                     editingCollapsedHints = collapsedHints;
+                    editingTapEdits = tapEditsWhenCollapsed;
                     fields[0].requestFocus();
                     // The heading: the panel's own message line, so it names what is being edited
                     // without spending a single pixel of row geometry - which the row cannot afford,
@@ -705,10 +768,14 @@ final class SettingsPanel {
     }
 
     /** Focusable only while its row is being edited; touch always. */
-    private void applyEditState(boolean editing, EditText[] fields, String[] hints, String[] editHints) {
+    private void applyEditState(boolean editing, EditText[] fields, String[] hints, String[] editHints,
+                                boolean tapEditsWhenCollapsed) {
         for (int i = 0; i < fields.length; i++) {
             fields[i].setFocusable(editing);
-            fields[i].setFocusableInTouchMode(true);
+            // A collapsed channel field stays tap-editable, because a phone needs that. A collapsed
+            // profile field does not: a tap on a profile row activates that profile, so the field has
+            // to be inert and let the tap through to the row. Edit is then the only way into a name.
+            fields[i].setFocusableInTouchMode(editing || tapEditsWhenCollapsed);
             fields[i].setHint(editing && editHints != null ? editHints[i] : hints[i]);
         }
     }
@@ -720,7 +787,7 @@ final class SettingsPanel {
         }
         editingRow.setSelected(false);
         editingRow.setText("Edit");
-        applyEditState(false, editingFields, editingCollapsedHints, null);
+        applyEditState(false, editingFields, editingCollapsedHints, null, editingTapEdits);
         editingRow = null;
         editingFields = null;
         editingCollapsedHints = null;

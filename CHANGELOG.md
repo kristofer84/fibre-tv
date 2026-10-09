@@ -3,6 +3,23 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.9
+
+Two faults in the 1.7 profile rows, both reported from use rather than found by reading.
+
+- **A profile row is now the gesture that activates that profile.** The rows replaced clickable chips,
+  and the activation went with them: a tap landed in the name field and started editing it. Tapping
+  the row - or selecting it with the D-pad and pressing centre - switches to that profile, and the row
+  is the first focus stop, so Down still moves one profile at a time.
+- **Renaming works.** `save()` looked for the name field one level too shallow: since the rows became
+  name-over-provenance, child 0 is the two-line container rather than the field, so the loop skipped
+  every row and a rename silently did nothing. A rename is now committed when Done is pressed, not
+  only on Save, because a name is not the list.
+- **Edit is the only way into a name.** A collapsed profile field is inert to touch as well as to the
+  D-pad, so a tap on a profile row activates instead of editing. Collapsed *channel* fields keep
+  tap-to-edit, because a phone needs that.
+- Saving a profile no longer relabels an imported list as "edited on this device".
+
 ### 1.8
 
 The Info line's resolution is real now. It read a dash because libVLC reports nothing here -
