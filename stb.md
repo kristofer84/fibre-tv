@@ -6,7 +6,7 @@ from a portal.
 ### The box
 
 **Arris/Motorola VIP2853** (CommScope, OUI `f8:a0:97`). Its DHCP request uses vendor
-class `the operator_VIP2853` and asks for option 43. On a normal LAN your router answers
+class naming the operator's branded model, and asks for option 43. On a normal LAN your router answers
 instead, which is harmless.
 
 Errors when provisioning fails:
@@ -47,6 +47,7 @@ I don't cover querying the portal. It's the operator's infrastructure and answer
 
 ### the operator Sweden vs Norway
 
-The portal is `portal-stb.tv.telenor.se`, so this is the operator's platform. the operator
+The portal lives on the operator's own domain and is theirs to serve, so the
+middleware behind the box is theirs as well.
 **Norway** uses VLAN 46 and IGMPv3; this line uses VLAN 501 and IGMPv2. Search results
 often mix them up.
