@@ -13,6 +13,11 @@ import java.io.IOException;
  * number comes from the same transport stream the SDT and teletext readers already read: one more
  * reader beside them, additive, and the verified video path is not involved at all.
  *
+ * Cost, since a relay pays for connections: this is a third short read per tune, beside the SDT
+ * probe and the teletext page probe. Each is independent and closes as soon as it has what it wants,
+ * but merging the SDT and video reads into one connection is the cheap fix if the relay cost ever
+ * becomes real - written here rather than remembered, because a message log is a stale source.
+ *
  * A dash is the failure mode, never a guess. If no parameter set arrives in time the caller shows a
  * dash, and a parse that produces an implausible size is discarded rather than displayed.
  *
