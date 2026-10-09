@@ -45,7 +45,7 @@ MAC address.
 
 I don't cover querying the portal. It's the operator's infrastructure and answers per device.
 
-### the operator Sweden vs Norway
+### Sweden vs Norway
 
 The portal lives on the operator's own domain and is theirs to serve, so the
 middleware behind the box is theirs as well.
