@@ -64,7 +64,9 @@ In the panel:
   (`Remove` -> `Tap again`) because it now sits one press to the right and is destructive.
   Nothing is applied until `Save`, deliberately: a half-typed address should not retune
   the picture. Tapping a field still edits it on a phone.
-- **Import a playlist.** Fetches an m3u from a URL. The status code is checked, the
+- **Import a playlist.** The URL field is a plain control rather than one of the touch-only fields
+  above, and that is deliberate: a remote has no keyboard, so the field has to be reachable with the
+  D-pad for the on-screen keyboard to be usable at all. Fetches an m3u from a URL. The status code is checked, the
   body is capped at 1 MB, and the text has to parse to at least one channel - which is
   what catches a URL that returns an HTML error page with a 200. A failure changes
   nothing at all.
@@ -182,6 +184,11 @@ So, for anything this project calls verified:
 
 - **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
   never reads `group-title`, so that field is for other players, is only knowable by reading it.
+- **An instrument pointed at a window answers a question about the window.** `uiautomator`'s dump
+  reports the nodes that are *on screen*, not the nodes that exist, so before concluding that a control
+  is missing, scroll to where it would be. Three separate "missing control" conclusions in one day came
+  from that single limit - the Edit button, Add channel, and the playlist import - and none of them was
+  an absence. It never produced a wrong artifact, only wrong certainty.
 - **Check the subject is alive before believing the instrument.** A device whose screen is asleep
   swallows input, so a check that sends nothing looks exactly like a feature that does nothing.
   `dumpsys power` reports `mWakefulness`; ask it before concluding anything from a device. This one costs
