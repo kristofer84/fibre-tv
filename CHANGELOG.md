@@ -22,6 +22,16 @@ strange text edit". The same trap sat one row up in the profile list.
 - **Remove now asks twice**: `Remove` -> `Tap again`. It is one press to the right of a focus stop and
   destructive, so without the confirmation this change would have made an accidental deletion easier,
   not only navigation faster.
+- **An Info line on demand**, over the picture: `SVT1 Stockholm HD - 1280x720 - 12.4 Mbit/s`.
+  Toggled from a new Info button in the chrome - the D-pad route every remote has - and from the
+  `KEYCODE_INFO` key where a remote carries one; the same toggle hides it. The **bandwidth** is the
+  stall watchdog's own sampling of `TrafficStats`, one source of truth so the figure shown and the
+  figure the watchdog acts on cannot disagree; measured against the line, SVT1 reads 12.4 Mbit/s and
+  TV4 19.1, matching an independent measurement of the same stream. The **resolution** is read from
+  libVLC and shows a dash until it reports one, because a wrong number is worse than no number - and
+  on these streams, through this rendering path, it does not report one: `getCurrentVideoTrack()`
+  stays empty, and the media track table lists only the first audio elementary stream.
+
 - **Profile rows get the same treatment**, since the profile name field had the same problem one row
   up, and making it non-focusable without an Edit would have left Delete as the row's only stop.
 - The panel is still an overlay over the player, and the membership drop in `onStop` is untouched.

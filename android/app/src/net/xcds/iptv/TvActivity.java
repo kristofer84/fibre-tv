@@ -78,6 +78,8 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
      * teletext ones type=2.
      */
     private static final int TRACK_TYPE_AUDIO = 0;
+    /** libvlc_media_track_type_t: video is 1. See the note on TRACK_TYPE_AUDIO. */
+    private static final int TRACK_TYPE_VIDEO = 1;
 
     /**
      * How long to look for a channel's subtitle pages when it is tuned, and how
@@ -144,6 +146,14 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     private Button audioButton;
     private Button subsButton;
     private Button settingsButton;
+    private Button infoButton;
+    /** The on-demand line: channel, resolution, bandwidth. Hidden until asked for. */
+    private TextView infoView;
+    private boolean infoShown;
+    /** Bytes per second, from the watchdog's own samples - the one place this app measures traffic. */
+    private long rxBytesPerSecond = -1;
+    private long lastRx;
+    private long lastRxAt;
 
     /**
      * The controls row, in order. Left and right step along this rather than between two
@@ -567,6 +577,20 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         cardParams.setMargins(insetPx(), insetPx(), 0, 0);
         root.addView(card, cardParams);
 
+        // The on-demand line, in the same shape as the card so the two read as one family. Above the
+        // subtitle area, and hidden while the chrome is up, so it competes with neither.
+        infoView = new TextView(this);
+        infoView.setTextColor(0xFFE8EAF0);
+        infoView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        infoView.setBackgroundResource(R.drawable.card_bg);
+        infoView.setPadding(dp(14), dp(8), dp(14), dp(8));
+        infoView.setVisibility(View.GONE);
+        FrameLayout.LayoutParams infoParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        infoParams.bottomMargin = dp(120);
+        root.addView(infoView, infoParams);
+
         // Two rows at the bottom: the track controls, then the channels. Keeping
         // them in separate rows means the D-pad can move between them and a long
         // channel name cannot scroll the controls out of reach.
@@ -619,10 +643,24 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         settingsButton.setOnTouchListener(holdChrome);
         controls.addView(audioButton, controlParams());
         controls.addView(subsButton, controlParams());
+        infoButton = new Button(this);
+        infoButton.setText("Info");
+        infoButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleInfo();
+                restartIdleTimer();
+            }
+        });
+        stylePill(infoButton, R.drawable.ic_info);
+        infoButton.setOnFocusChangeListener(focusWatcher);
+        infoButton.setOnTouchListener(holdChrome);
         controls.addView(settingsButton, controlParams());
+        controls.addView(infoButton, controlParams());
         controlButtons.add(audioButton);
         controlButtons.add(subsButton);
         controlButtons.add(settingsButton);
+        controlButtons.add(infoButton);
 
         controlsScroll = new HorizontalScrollView(this);
         controlsScroll.setHorizontalScrollBarEnabled(false);
@@ -1528,6 +1566,12 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
                 showChromeFocused();
                 return true;
 
+            case KeyEvent.KEYCODE_INFO:
+                // For remotes that carry an info key; the Info button in the chrome is the route that
+                // every remote has, since it is reached with the D-pad like the rest of the chrome.
+                toggleInfo();
+                restartIdleTimer();
+                return true;
             case KeyEvent.KEYCODE_CAPTIONS:
                 // Present on some remotes; toggles subtitles without the bar.
                 cycleSubs();
@@ -1564,6 +1608,78 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
     }
 
     // ------------------------------------------------------------------ utils
+
+    /**
+     * The on-demand line: what is playing, at what resolution, at what rate.
+     *
+     * Both numbers already exist here. The resolution comes from libVLC's current video track; when it
+     * has not been reported yet this shows a dash, because a wrong number is worse than no number. The
+     * rate is the watchdog's own sampling of TrafficStats - the only traffic figure that works on these
+     * streams - so the number on screen and the number the watchdog acts on cannot disagree.
+     */
+    private void toggleInfo() {
+        infoShown = !infoShown;
+        Log.i(TAG, "info line " + (infoShown ? "shown" : "hidden"));
+        updateInfoLine();
+    }
+
+    private void updateInfoLine() {
+        if (infoView == null) {
+            return;
+        }
+        // Hidden while the chrome is up: the bars and the subtitle text already own that part of the
+        // screen, and this is a line you ask for rather than one that competes.
+        if (!infoShown || chromeVisible()) {
+            infoView.setVisibility(View.GONE);
+            return;
+        }
+        String line = nameOf(current) + " - " + resolution() + " - " + bitrate();
+        if (!line.contentEquals(infoView.getText())) {
+            // Logged whenever it changes, so the reading can be checked against a known table without
+            // reading pixels off a screenshot.
+            Log.i(TAG, "info: " + line);
+            infoView.setText(line);
+        }
+        infoView.setVisibility(View.VISIBLE);
+    }
+
+    /**
+     * What libVLC says it is decoding, or a dash.
+     *
+     * The size arrives through the Vout callback below, which is the only path that reports it here:
+     * getCurrentVideoTrack() stays empty when video goes out through a Vout view, and the media's
+     * track table lists only the first audio elementary stream. It is consulted as a second opinion
+     * because a wrong number would be worse than a dash.
+     */
+    private String resolution() {
+        if (player == null) {
+            return "\u2014";
+        }
+        // The media's track table, which is where the audio labels come from too. IMedia.VideoTrack
+        // carries width and height; libVLC fills it once the video is being decoded, and until then
+        // this shows a dash rather than a guess.
+        IMedia media = player.getMedia();
+        if (media != null) {
+            for (int i = 0; i < media.getTrackCount(); i++) {
+                IMedia.Track track = media.getTrack(i);
+                if (track != null && track.type == TRACK_TYPE_VIDEO
+                        && track instanceof IMedia.VideoTrack) {
+                    IMedia.VideoTrack video = (IMedia.VideoTrack) track;
+                    if (video.width > 0 && video.height > 0) {
+                        return video.width + "x" + video.height;
+                    }
+                }
+            }
+        }
+        return "\u2014";
+    }
+
+    private String bitrate() {
+        if (rxBytesPerSecond <= 0) {
+            return "\u2014";
+        }
+        return String.format(java.util.Locale.US, "%.1f Mbit/s", rxBytesPerSecond * 8.0 / 1000000.0);
+    }
 
     /**
      * Settings, as an overlay over the playing picture and hosted by this activity.
@@ -1738,6 +1854,15 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             return;
         }
         long now = System.currentTimeMillis();
+        // Measured here and nowhere else: the watchdog already samples this counter, and a second
+        // sampling elsewhere is a second answer waiting to disagree with it.
+        long received = uidRxBytes();
+        if (lastRxAt > 0 && now > lastRxAt) {
+            rxBytesPerSecond = Math.max(0, (received - lastRx) * 1000 / (now - lastRxAt));
+            updateInfoLine();
+        }
+        lastRx = received;
+        lastRxAt = now;
         // Re-check the trim here as well as on track selection: the media track table, which is
         // where the codec label comes from, is not populated at the instant a track is switched,
         // so the first attempt can fall back to "Other" and never be corrected - which is what
