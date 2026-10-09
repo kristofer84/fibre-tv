@@ -29,7 +29,7 @@ strange text edit". The same trap sat one row up in the profile list.
 - **Removing a channel parks the focus on Add channel** rather than dropping it onto the panel, the
   same rule the profile list uses when a delete takes the focused row away.
 
-- **An Info line on demand**, over the picture: `SVT1 Stockholm HD - 1280x720 - 12.4 Mbit/s`.
+- **An Info line on demand**, over the picture: `SVT1 Stockholm HD - — - 12.4 Mbit/s`.
   Toggled from a new Info button in the chrome - the D-pad route every remote has - and from the
   `KEYCODE_INFO` key where a remote carries one; the same toggle hides it. The **bandwidth** is the
   stall watchdog's own sampling of `TrafficStats`, one source of truth so the figure shown and the
