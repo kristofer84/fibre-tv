@@ -182,6 +182,11 @@ So, for anything this project calls verified:
 
 - **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
   never reads `group-title`, so that field is for other players, is only knowable by reading it.
+- **Check the subject is alive before believing the instrument.** A device whose screen is asleep
+  swallows input, so a check that sends nothing looks exactly like a feature that does nothing.
+  `dumpsys power` reports `mWakefulness`; ask it before concluding anything from a device. This one costs
+  a false conclusion rather than a wrong note, and it is the only fault here where the instrument was
+  right and pointed at the right object - the subject was simply not listening.
 - **Name the instrument that produced the claim.** `aapt dump badging` for the packaged label - the
   manifest is binary AXML with UTF-16 strings, so a search for the text finds nothing and says so
   misleadingly. The apk's own `assets/channels.m3u8` for the playlist that ships. `git ls-remote` for
@@ -192,6 +197,11 @@ Where a rule lives matters as much as what it says: **a rule about stale sources
 has the same disease it describes.** That is why these are written here, in the repository, beside the
 code they are about, and why the follow-ups that matter end up in a source comment rather than in a
 message. Knowledge in the code travels with the code.
+
+And when a question is unclear to the person it is aimed at, the fault is in the question rather than in
+their answer. A rule that needs a decision is worth writing out in full rather than asking about in
+shorthand: two people asked for one ruling on this section and the reply was confusion, which is what
+asking in shorthand buys.
 
 ### Where the channel names come from
 
