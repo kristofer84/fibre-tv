@@ -3,6 +3,33 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.5
+
+Three fixes from installing v1.4 on a phone, which lays the panel out at a different scale
+than a television does: 2340x1080 at a much higher density, letterboxed, so nothing that was
+tuned to 1920x1080 at density 320 can be trusted.
+
+- **One icon.** `SettingsActivity` carried both `LEANBACK_LAUNCHER` and `LAUNCHER`, which put
+  a second icon in a phone's app list. It keeps the leanback entry only. The player's tile is
+  the entry on both, and the Settings button inside the player is built before the channel
+  list is read, so the route that always exists is unaffected.
+- **The profile chips can no longer be covered by the field below them.** The row of chips,
+  the row of buttons and the name field are now three fixed-height rows with real gaps, every
+  row in the panel has an explicit height, and every label is single-line and ellipsised. No
+  density, font scale or wrapping label can now change a row's height and produce an overlap.
+  The previous fix was a 14dp margin, which was merely enough at one density.
+- **Adding or removing a profile no longer moves anything.** The chips scroll sideways in
+  their own row. `New profile` and `Delete this profile` live in a second row that is built
+  once, so their positions are fixed. After an add or a remove the chip row's scroll position
+  is restored, so the viewer keeps looking at what they were looking at. The confirmation
+  label was shortened for the same reason: a label that grows changes a button's width under
+  the finger.
+
+The in-place two-tap delete was kept rather than replaced by a dialog. It was chosen with a
+remote in mind, but it is also just tapping twice on a phone, it is one construction for both
+hosts, and with fixed positions nothing moves under the finger any more. A dialog remains the
+alternative if the two-tap turns out to be awkward on a phone.
+
 ### 1.4
 
 Everything since v1.2, including the 1.3 version bump that was made in the tree but

@@ -14,6 +14,7 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -62,13 +63,18 @@ final class SettingsPanel {
     /** A playlist bigger than this is not a playlist. Stops a wrong URL filling memory. */
     private static final int MAX_BYTES = 1 << 20;
 
+    /** The gap between rows in a block, in dp: a real gap, not a margin that happens to fit. */
+    private static final int GAP_DP = 12;
+
     private final Activity host;
     private final Host callback;
 
     private LinearLayout rows;
     /** The control the D-pad should start on. See focusFirst. */
     private View firstControl;
-    private LinearLayout profileRow;
+    /** The chip row: one fixed height, scrolls sideways when the profiles do not fit. */
+    private HorizontalScrollView chipScroll;
+    private LinearLayout chips;
     private EditText profileNameField;
     private TextView status;
     private EditText delayField;
@@ -83,6 +89,25 @@ final class SettingsPanel {
     SettingsPanel(Activity host, Host callback) {
         this.host = host;
         this.callback = callback;
+    }
+
+    /**
+     * A row of the panel: full width, one fixed height, and a gap above it.
+     *
+     * Every row goes through this, because a row whose height depends on its own text is a row whose
+     * height changes with density, font scale or language - and that is how the profile chips ended
+     * up underneath the field below them on a phone, at a density the 14dp margin they had been given
+     * was never right for.
+     */
+    private LinearLayout.LayoutParams rowParams(int gapDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                (int) host.getResources().getDimension(R.dimen.settings_field_height));
+        // dp() on the way in: the caller passes dp and this converts. Passing 12 straight to
+        // setMargins is 12 *pixels*, which is a 4dp gap at 480dpi - the kind of mistake that looks
+        // fine on the device it was written for and thin everywhere else.
+        params.setMargins(0, dp(gapDp), 0, 0);
+        return params;
     }
 
     private int dp(int value) {
@@ -134,22 +159,51 @@ final class SettingsPanel {
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // ---- profiles block
+        // Two fixed rows, not one wrapping row. The chips scroll sideways in the first; the buttons
+        // that change the list sit in the second. So adding or removing a profile moves nothing and
+        // changes no height - on a phone the single row reflowed, and a label that wrapped at a
+        // different density pushed the chips underneath the field below them. Every row in this panel
+        // has an explicit height for that same reason.
         heading(root, "Profiles");
-        profileRow = new LinearLayout(host);
-        profileRow.setOrientation(LinearLayout.HORIZONTAL);
-        profileRow.setGravity(Gravity.CENTER_VERTICAL);
-        LinearLayout.LayoutParams profileParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        profileParams.setMargins(0, 0, 0, dp(14));
-        root.addView(profileRow, profileParams);
+
+        chipScroll = new HorizontalScrollView(host);
+        chipScroll.setHorizontalScrollBarEnabled(false);
+        chips = new LinearLayout(host);
+        chips.setOrientation(LinearLayout.HORIZONTAL);
+        chips.setGravity(Gravity.CENTER_VERTICAL);
+        chipScroll.addView(chips, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(chipScroll, rowParams(0));
+
+        LinearLayout profileActions = new LinearLayout(host);
+        profileActions.setOrientation(LinearLayout.HORIZONTAL);
+        profileActions.setGravity(Gravity.CENTER_VERTICAL);
+        profileActions.addView(pill("New profile", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                cancelDelete();
+                String name = "Profile " + (Playlist.profileIds(host).size() + 1);
+                Playlist.createProfile(host, name, Playlist.buildM3U(rowsAsChannels()));
+                refresh();
+                callback.settingsChanged();
+                say("created " + name + " as a copy of the list that was on screen");
+            }
+        }));
+        deleteButton = pill("Delete this profile", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                confirmDelete();
+            }
+        });
+        profileActions.addView(deleteButton);
+        root.addView(profileActions, rowParams(GAP_DP));
 
         LinearLayout nameRow = new LinearLayout(host);
         nameRow.setOrientation(LinearLayout.HORIZONTAL);
         nameRow.setGravity(Gravity.CENTER_VERTICAL);
-        nameRow.setPadding(0, dp(2), 0, 0);
         label(nameRow, "Profile name");
         profileNameField = control(nameRow, "profile name", null);
-        root.addView(nameRow);
+        root.addView(nameRow, rowParams(GAP_DP));
 
         // ---- channels block
         heading(root, "Channels");
@@ -180,7 +234,7 @@ final class SettingsPanel {
                 callback.closeSettings();
             }
         }));
-        root.addView(actions);
+        root.addView(actions, rowParams(GAP_DP));
 
         // ---- audio block
         heading(root, "Audio");
@@ -208,7 +262,7 @@ final class SettingsPanel {
             }
         });
         importRow.addView(importButton);
-        root.addView(importRow);
+        root.addView(importRow, rowParams(GAP_DP));
 
         // ---- about and status
         LinearLayout aboutRow = new LinearLayout(host);
@@ -229,7 +283,7 @@ final class SettingsPanel {
                 host.startActivity(new Intent(host, AboutActivity.class));
             }
         }));
-        root.addView(aboutRow);
+        root.addView(aboutRow, rowParams(GAP_DP));
 
         status = new TextView(host);
         status.setTextColor(0xFF9E9E9E);
@@ -272,6 +326,8 @@ final class SettingsPanel {
         view.setText(text);
         view.setTextColor(0xFF9E9E9E);
         view.setTextSize(TypedValue.COMPLEX_UNIT_SP, spOf(R.dimen.settings_text_size));
+        view.setSingleLine(true);                   // a label that wraps moves everything below it
+        view.setEllipsize(TextUtils.TruncateAt.END);
         view.setMinWidth(dp(120));
         parent.addView(view);
     }
@@ -292,14 +348,20 @@ final class SettingsPanel {
         button.setBackgroundResource(R.drawable.button_bg);
         button.setTextColor(host.getResources().getColorStateList(R.color.button_text));
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, spOf(R.dimen.settings_text_size));
-        button.setPadding(dp(14), dp(6), dp(14), dp(6));
+        button.setPadding(dp(14), 0, dp(14), 0);
+        // One line, always: a pill that wraps is a pill of a different height, which is what moved
+        // things around at another density. A long label ellipsises instead of growing.
+        button.setSingleLine(true);
+        button.setEllipsize(TextUtils.TruncateAt.END);
+        button.setGravity(Gravity.CENTER);
         button.setMinWidth(0);
         button.setMinimumWidth(0);
         button.setMinHeight(0);
         button.setMinimumHeight(0);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        params.setMargins(0, dp(6), dp(8), 0);
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                (int) host.getResources().getDimension(R.dimen.settings_field_height));
+        params.setMargins(0, 0, dp(8), 0);
         button.setLayoutParams(params);
         return button;
     }
@@ -339,7 +401,7 @@ final class SettingsPanel {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         label(row, labelText);
-        parent.addView(row);
+        parent.addView(row, rowParams(GAP_DP));
         return control(row, "", description);
     }
 
@@ -388,8 +450,8 @@ final class SettingsPanel {
         });
         // A fixed column width, so Remove lines up down the list instead of drifting with the text.
         LinearLayout.LayoutParams removeParams = new LinearLayout.LayoutParams(
-                dp(120), ViewGroup.LayoutParams.WRAP_CONTENT);
-        removeParams.setMargins(dp(8), dp(6), 0, 0);
+                dp(120), (int) host.getResources().getDimension(R.dimen.settings_field_height));
+        removeParams.setMargins(dp(8), 0, 0, 0);
         remove.setLayoutParams(removeParams);
         row.addView(remove);
 
@@ -403,7 +465,7 @@ final class SettingsPanel {
     void refresh() {
         Playlist.ensureProfile(host);
         loadRows(Playlist.load(host, ASSET));
-        buildProfileRow();
+        fillProfileChips();
         profileNameField.setText(Playlist.activeName(host));
         delayField.setText(String.valueOf(AudioTuning.delayMs(host)));
         trimFirstField.setText(String.valueOf(AudioTuning.trim(host, AudioTuning.FIRST)));
@@ -425,8 +487,16 @@ final class SettingsPanel {
      * One chip per profile, the active one marked with the accent chip - a view state rather than a
      * character in the label, so it styles with everything else and is announced properly.
      */
-    private void buildProfileRow() {
-        profileRow.removeAllViews();
+    /**
+     * The chip row, rebuilt whenever the set of profiles changes - and only then. The buttons that
+     * change the list are built once, in their own row, so adding or removing a profile cannot move
+     * them; the row's height is fixed, so it cannot reflow either. The scroll position is put back
+     * afterwards, because the viewer should keep looking at what they were looking at.
+     */
+    private void fillProfileChips() {
+        final int scrollX = chipScroll.getScrollX();
+        chips.removeAllViews();
+        firstControl = null;
         for (final String id : Playlist.profileIds(host)) {
             String name = Playlist.profileName(host, id);
             boolean active = id.equals(Playlist.activeId(host));
@@ -443,38 +513,27 @@ final class SettingsPanel {
                     say("switched to " + Playlist.activeName(host));
                 }
             });
-            if (active || firstControl == null) {
-                firstControl = chip;
-            }
             chip.setSelected(active);
             if (active) {
                 chip.setContentDescription(name + ", current profile");
+                firstControl = chip;
+            } else if (firstControl == null) {
+                firstControl = chip;
             }
-            profileRow.addView(chip);
+            chips.addView(chip);
         }
-        profileRow.addView(pill("New profile", new View.OnClickListener() {
+        // Posted: the row has to be measured before it can be scrolled.
+        chipScroll.post(new Runnable() {
             @Override
-            public void onClick(View v) {
-                cancelDelete();
-                String name = "Profile " + (Playlist.profileIds(host).size() + 1);
-                Playlist.createProfile(host, name, Playlist.buildM3U(rowsAsChannels()));
-                refresh();
-                callback.settingsChanged();
-                say("created " + name + " as a copy of the list that was on screen");
-            }
-        }));
-        deleteButton = pill("Delete this profile", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                confirmDelete();
+            public void run() {
+                chipScroll.scrollTo(scrollX, 0);
             }
         });
-        profileRow.addView(deleteButton);
     }
 
     /**
-     * Put the D-pad on the first control, not on the panel itself. Focusing the container looks
-     * the same in a screenshot and behaves differently on a remote: its focus rectangle is the whole
+     * Put the D-pad on the first control, not on the panel itself. Focusing the container looks the
+     * same in a screenshot and behaves differently on a remote: its focus rectangle is the whole
      * screen, so the first Down is a focus search from an impossible position and lands on whatever
      * FocusFinder picks - on the device that was a Remove button at the bottom of the list.
      */
@@ -561,7 +620,9 @@ final class SettingsPanel {
     private void confirmDelete() {
         if (!deletePending) {
             deletePending = true;
-            deleteButton.setText("Tap again to delete " + Playlist.activeName(host));
+            // Short, because the button's width must not change under the viewer's finger: the
+            // profile being deleted is named in the line below the list instead.
+            deleteButton.setText("Tap again to delete");
             say("that will forget this profile's list: tap Delete again, or anything else to cancel");
             return;
         }
