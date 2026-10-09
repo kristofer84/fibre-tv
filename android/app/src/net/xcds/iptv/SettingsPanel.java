@@ -14,7 +14,6 @@ import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -72,10 +71,10 @@ final class SettingsPanel {
     private LinearLayout rows;
     /** The control the D-pad should start on. See focusFirst. */
     private View firstControl;
-    /** The chip row: one fixed height, scrolls sideways when the profiles do not fit. */
-    private HorizontalScrollView chipScroll;
-    private LinearLayout chips;
-    private EditText profileNameField;
+    /** The profile rows: one per profile, with rename and delete on the row itself. */
+    private LinearLayout profileList;
+    /** The delete button waiting for its second tap, if any. */
+    private Button armedButton;
     private TextView status;
     private EditText delayField;
     private EditText trimFirstField;
@@ -83,8 +82,6 @@ final class SettingsPanel {
     private EditText trimOtherField;
     private EditText urlField;
     private Button importButton;
-    private Button deleteButton;
-    private boolean deletePending;
 
     SettingsPanel(Activity host, Host callback) {
         this.host = host;
@@ -159,22 +156,16 @@ final class SettingsPanel {
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         // ---- profiles block
-        // Two fixed rows, not one wrapping row. The chips scroll sideways in the first; the buttons
-        // that change the list sit in the second. So adding or removing a profile moves nothing and
-        // changes no height - on a phone the single row reflowed, and a label that wrapped at a
-        // different density pushed the chips underneath the field below them. Every row in this panel
-        // has an explicit height for that same reason.
+        // One row per profile, the active one marked by a view state, with the actions on the row
+        // itself. A list rather than a row of chips: rows do not reflow or scroll sideways as
+        // profiles come and go, renaming happens where the name is, and it keeps working past the
+        // number of chips that would fit across a screen.
         heading(root, "Profiles");
 
-        chipScroll = new HorizontalScrollView(host);
-        chipScroll.setHorizontalScrollBarEnabled(false);
-        chips = new LinearLayout(host);
-        chips.setOrientation(LinearLayout.HORIZONTAL);
-        chips.setGravity(Gravity.CENTER_VERTICAL);
-        chipScroll.addView(chips, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        root.addView(chipScroll, rowParams(0));
-
+        // The add action sits above the list, not below it. Below, every add would push it one row
+        // further down, and a second tap in the same place would land on the new row's Delete -
+        // which on a phone is a tap away from arming a delete the viewer never aimed at. Above, it
+        // never moves, and the new row appears directly beneath it.
         LinearLayout profileActions = new LinearLayout(host);
         profileActions.setOrientation(LinearLayout.HORIZONTAL);
         profileActions.setGravity(Gravity.CENTER_VERTICAL);
@@ -189,21 +180,11 @@ final class SettingsPanel {
                 say("created " + name + " as a copy of the list that was on screen");
             }
         }));
-        deleteButton = pill("Delete this profile", new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                confirmDelete();
-            }
-        });
-        profileActions.addView(deleteButton);
         root.addView(profileActions, rowParams(GAP_DP));
 
-        LinearLayout nameRow = new LinearLayout(host);
-        nameRow.setOrientation(LinearLayout.HORIZONTAL);
-        nameRow.setGravity(Gravity.CENTER_VERTICAL);
-        label(nameRow, "Profile name");
-        profileNameField = control(nameRow, "profile name", null);
-        root.addView(nameRow, rowParams(GAP_DP));
+        profileList = new LinearLayout(host);
+        profileList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(profileList);
 
         // ---- channels block
         heading(root, "Channels");
@@ -465,8 +446,7 @@ final class SettingsPanel {
     void refresh() {
         Playlist.ensureProfile(host);
         loadRows(Playlist.load(host, ASSET));
-        fillProfileChips();
-        profileNameField.setText(Playlist.activeName(host));
+        fillProfileRows();
         delayField.setText(String.valueOf(AudioTuning.delayMs(host)));
         trimFirstField.setText(String.valueOf(AudioTuning.trim(host, AudioTuning.FIRST)));
         trimSecondField.setText(String.valueOf(AudioTuning.trim(host, AudioTuning.SECOND)));
@@ -488,47 +468,93 @@ final class SettingsPanel {
      * character in the label, so it styles with everything else and is announced properly.
      */
     /**
-     * The chip row, rebuilt whenever the set of profiles changes - and only then. The buttons that
-     * change the list are built once, in their own row, so adding or removing a profile cannot move
-     * them; the row's height is fixed, so it cannot reflow either. The scroll position is put back
-     * afterwards, because the viewer should keep looking at what they were looking at.
+     * One row per profile: the name, editable where it is, and Delete in the row's own column.
+     *
+     * The active profile is marked with setSelected on the row, which draws the same accent chip the
+     * playing channel uses in the chrome - a view state rather than a character in a label, so it is
+     * visible before anyone presses a key and cannot be confused with a name.
+     *
+     * The rows are rebuilt when the set of profiles changes, and that is the only thing that can
+     * move them: every row owns its own actions, so an add or a remove cannot shuffle another row's.
      */
-    private void fillProfileChips() {
-        final int scrollX = chipScroll.getScrollX();
-        chips.removeAllViews();
+    private void fillProfileRows() {
+        profileList.removeAllViews();
         firstControl = null;
+        cancelDelete();
         for (final String id : Playlist.profileIds(host)) {
-            String name = Playlist.profileName(host, id);
-            boolean active = id.equals(Playlist.activeId(host));
-            Button chip = pill(name, new View.OnClickListener() {
+            final boolean active = id.equals(Playlist.activeId(host));
+
+            LinearLayout row = new LinearLayout(host);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(dp(8), 0, dp(8), 0);
+            row.setTag(id);
+            row.setSelected(active);                    // the active marker, as a state
+            row.setBackgroundResource(R.drawable.field_bg);
+
+            EditText name = new EditText(host);
+            field(name, "profile name", spOf(R.dimen.settings_text_size));
+            name.setBackgroundResource(R.drawable.field_bg);
+            name.setText(Playlist.profileName(host, id));
+            name.setContentDescription(active ? "profile name, current profile" : "profile name");
+            row.addView(name, new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+
+            final Button delete = pill("Delete", null);
+            delete.setContentDescription("delete " + Playlist.profileName(host, id));
+            delete.setOnClickListener(new View.OnClickListener() {
                 @Override
                 public void onClick(View v) {
-                    if (id.equals(Playlist.activeId(host))) {
+                    if (armedButton != delete) {
+                        armDelete(delete, id);
                         return;
                     }
                     cancelDelete();
-                    Playlist.switchTo(host, id);
+                    String name = Playlist.profileName(host, id);
+                    boolean deleted = Playlist.delete(host, id);
                     refresh();
                     callback.settingsChanged();
-                    say("switched to " + Playlist.activeName(host));
+                    if (deleted) {
+                        say("deleted " + name + "; now on " + Playlist.activeName(host));
+                        if (firstControl != null) {
+                            firstControl.requestFocus();     // a sensible row, not the container
+                        }
+                    } else {
+                        say("that is the only profile, so it was not deleted");
+                    }
                 }
             });
-            chip.setSelected(active);
+            LinearLayout.LayoutParams deleteParams = new LinearLayout.LayoutParams(
+                    dp(120), (int) host.getResources().getDimension(R.dimen.settings_field_height));
+            deleteParams.setMargins(dp(8), 0, 0, 0);
+            row.addView(delete, deleteParams);
+
+            profileList.addView(row, rowParams(GAP_DP));
             if (active) {
-                chip.setContentDescription(name + ", current profile");
-                firstControl = chip;
-            } else if (firstControl == null) {
-                firstControl = chip;
+                firstControl = name;
             }
-            chips.addView(chip);
         }
-        // Posted: the row has to be measured before it can be scrolled.
-        chipScroll.post(new Runnable() {
-            @Override
-            public void run() {
-                chipScroll.scrollTo(scrollX, 0);
-            }
-        });
+    }
+
+    /**
+     * Arm a row's delete: the label swaps rather than grows, in a column of fixed width, so nothing
+     * moves under the finger that is about to tap it a second time.
+     */
+    private void armDelete(Button button, String id) {
+        cancelDelete();
+        armedButton = button;
+        button.setText("Tap again");
+        button.setSelected(true);                       // armed, drawn as the accent chip
+        say("that will forget " + Playlist.profileName(host, id)
+                + "'s list: tap again, or anything else to cancel");
+    }
+
+    private void cancelDelete() {
+        if (armedButton != null) {
+            armedButton.setText("Delete");
+            armedButton.setSelected(false);
+            armedButton = null;
+        }
     }
 
     /**
@@ -576,7 +602,20 @@ final class SettingsPanel {
     private void save() {
         cancelDelete();
         saveAudio();
-        Playlist.rename(host, profileNameField.getText().toString());
+        // Every row is renamed, not just the active one: the name is edited in the row.
+        for (int i = 0; i < profileList.getChildCount(); i++) {
+            View row = profileList.getChildAt(i);
+            if (!(row instanceof LinearLayout) || !(row.getTag() instanceof String)
+                    || ((LinearLayout) row).getChildCount() == 0) {
+                continue;
+            }
+            View first = ((LinearLayout) row).getChildAt(0);
+            if (!(first instanceof EditText)) {
+                continue;
+            }
+            Playlist.rename(host, (String) row.getTag(),
+                    ((EditText) first).getText().toString());
+        }
         String text = Playlist.buildM3U(rowsAsChannels());
         if (Playlist.save(host, text, Playlist.EDITED)) {
             Log.i(TAG, "settings: saved");
@@ -616,41 +655,6 @@ final class SettingsPanel {
      * Deleting a list is the one action that loses something, so it asks - in place rather than with
      * a dialog, because a dialog on a remote is awkward and a button that says what the next tap will
      * do is just as clear. Any other action cancels it.
-     */
-    private void confirmDelete() {
-        if (!deletePending) {
-            deletePending = true;
-            // Short, because the button's width must not change under the viewer's finger: the
-            // profile being deleted is named in the line below the list instead.
-            deleteButton.setText("Tap again to delete");
-            say("that will forget this profile's list: tap Delete again, or anything else to cancel");
-            return;
-        }
-        deletePending = false;
-        String name = Playlist.activeName(host);
-        if (Playlist.deleteActive(host)) {
-            refresh();
-            callback.settingsChanged();
-            say("deleted " + name + "; now on " + Playlist.activeName(host));
-        } else {
-            deleteButton.setText("Delete this profile");
-            say("that is the only profile, so it was not deleted");
-        }
-    }
-
-    private void cancelDelete() {
-        if (deletePending) {
-            deletePending = false;
-            if (deleteButton != null) {
-                deleteButton.setText("Delete this profile");
-            }
-        }
-    }
-
-    /**
-     * Fetch a playlist and show it before keeping it. The HTTP status is checked, the body is capped,
-     * and the text has to parse to at least one channel - which is what catches a URL that returns
-     * an HTML error page with a 200. A failure changes nothing at all.
      */
     private void importFromUrl() {
         final String url = urlField.getText().toString().trim();

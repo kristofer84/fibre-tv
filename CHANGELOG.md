@@ -3,6 +3,36 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.6
+
+The profile chips became a list. This is the answer to "the buttons could use another way to work as
+well": not a dialog, and not the chip row made stable, but one row per profile.
+
+- **One row per profile**, the name editable where it is, and `Delete` in the row's own action
+  column. Renaming and deleting are actions on the row instead of a field and a button somewhere
+  else. Renaming is per profile rather than per active profile, and the API follows: `rename` and
+  `delete` take an id.
+- **The active profile is marked with a view state** - `setSelected` on the row, which draws the
+  same accent chip the playing channel uses in the chrome - so the marker cannot be confused with a
+  name, and it is visible before anything is pressed.
+- **Focus lands on the active profile's name field** when the panel opens, never on the panel
+  itself. A container that fills the screen has a focus rectangle covering everything, so the first
+  Down from it is a focus search from an impossible position - and on a list that is exactly how the
+  first Down ends up on a Delete.
+- **Adding cannot shuffle anything.** `New profile` sits above the list. Below it, every add would
+  push it one row further down and the next tap in the same place would land on the new row's
+  Delete.
+- **Delete is still the in-place two-tap**, now per row, with the label swapping to `Tap again`
+  inside a fixed-width column so it cannot grow under the finger.
+- Deleting a profile nobody is watching does not re-tune the stream: the revision only changes when
+  the active profile is the one that went away.
+
+Verified on the TV: rows of 44dp with 12dp gaps and no overlap at density 480 with font_scale 1.3;
+focus on open on the active row's name field; adding two profiles left the add row's bounds
+unchanged; renaming two rows and saving logged both renames and survived a restart with the row's
+name and its delete description agreeing; deleting an inactive profile took two taps, left the
+active profile alone, and logged no re-tune.
+
 ### 1.5
 
 Three fixes from installing v1.4 on a phone, which lays the panel out at a different scale

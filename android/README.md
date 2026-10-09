@@ -50,9 +50,12 @@ when nothing plays at all, or on a phone; both hosts build the same panel.
 
 In the panel:
 
-- **Profiles.** A name plus a saved m3u list. `LAN` is created on first run from the
-  built-in list; `New profile` copies the list that is on screen; switching saves and
-  reloads around the switch. The active one is the filled chip.
+- **Profiles.** A name plus a saved m3u list, one row per profile: the name is edited in
+  the row, `Delete` is the row's own action and wants a second tap to confirm, and
+  `New profile` copies the list that is on screen (it sits above the list, so adding a row
+  cannot push it down under the finger that just tapped it). The active profile is the row
+  drawn with the accent chip - a view state rather than a mark in its name - and opening the
+  panel puts the remote on that row's name field.
 - **Channels.** A name over its address, both editable, with `Remove` in its own
   column. Nothing is applied until `Save`, deliberately: a half-typed address should
   not retune the picture.

@@ -154,9 +154,12 @@ final class Playlist {
         Log.i(TAG, "playlist: profile " + name + " created from the current list");
     }
 
-    static void rename(Context context, String name) {
+    /**
+     * Rename one profile, active or not: the settings panel edits every row's name now, so renaming
+     * is per id rather than per active. No revision bump, because a name is not the list.
+     */
+    static void rename(Context context, String id, String name) {
         ensureProfile(context);
-        String id = activeId(context);
         if (id == null || name == null || name.trim().isEmpty()) {
             return;
         }
@@ -165,27 +168,39 @@ final class Playlist {
     }
 
     /** Removes the active profile. Refuses to remove the last one: there is always a list. */
-    static boolean deleteActive(Context context) {
+    /**
+     * Delete one profile, active or not; refuses the last one. Deleting the active profile moves to
+     * whichever is first, and only then does the revision change - deleting a profile nobody is
+     * watching must not re-tune the stream.
+     */
+    static boolean delete(Context context, String id) {
         ensureProfile(context);
         List<String> ids = profileIds(context);
-        String id = activeId(context);
-        if (id == null || ids.size() <= 1) {
+        if (id == null || !ids.contains(id) || ids.size() <= 1) {
             Log.i(TAG, "playlist: refused to delete the only profile");
             return false;
         }
+        String name = profileName(context, id);
+        boolean wasActive = id.equals(activeId(context));
         ids.remove(id);
-        prefs(context).edit()
+        SharedPreferences.Editor edit = prefs(context).edit()
                 .putString(KEY_IDS, join(ids))
                 .remove(keyName(id))
                 .remove(keyText(id))
-                .remove(keySource(id))
-                .putString(KEY_ACTIVE, ids.get(0))
-                .putInt(KEY_REVISION, revision(context) + 1)
-                .apply();
-        Log.i(TAG, "playlist: profile deleted, now on " + profileName(context, ids.get(0)));
+                .remove(keySource(id));
+        if (wasActive) {
+            edit.putString(KEY_ACTIVE, ids.get(0)).putInt(KEY_REVISION, revision(context) + 1);
+        }
+        edit.apply();
+        Log.i(TAG, "playlist: deleted " + name + (wasActive ? ", now on " + activeName(context) : ""));
         return true;
     }
 
+    /**
+     * Bumped on every save, reset, switch and profile edit. The player screen keeps the
+     * revision it loaded and reloads when this changes, which is how an edit reaches a
+     * running app without the two activities having to know about each other.
+     */
     private static String join(List<String> ids) {
         StringBuilder out = new StringBuilder();
         for (String id : ids) {
@@ -197,11 +212,6 @@ final class Playlist {
         return out.toString();
     }
 
-    /**
-     * Bumped on every save, reset, switch and profile edit. The player screen keeps the
-     * revision it loaded and reloads when this changes, which is how an edit reaches a
-     * running app without the two activities having to know about each other.
-     */
     static int revision(Context context) {
         return prefs(context).getInt(KEY_REVISION, 0);
     }
