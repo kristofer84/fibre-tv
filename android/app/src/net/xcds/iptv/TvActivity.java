@@ -1665,9 +1665,11 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
         if (infoView == null) {
             return;
         }
-        // Hidden while the chrome is up: the bars and the subtitle text already own that part of the
-        // screen, and this is a line you ask for rather than one that competes.
-        if (!infoShown || chromeVisible()) {
+        // Shown immediately, chrome or no chrome. It used to wait for the chrome to hide, which
+        // meant the Info button - a control that lives *in* the chrome - appeared to do nothing for
+        // four seconds, long enough to press it again and toggle it straight back off. The line is
+        // brought to the front so the bars cannot cover it while they are up.
+        if (!infoShown) {
             infoView.setVisibility(View.GONE);
             return;
         }
@@ -1678,6 +1680,7 @@ public class TvActivity extends Activity implements IVLCVout.Callback {
             Log.i(TAG, "info: " + line);
             infoView.setText(line);
         }
+        infoView.bringToFront();
         infoView.setVisibility(View.VISIBLE);
     }
 

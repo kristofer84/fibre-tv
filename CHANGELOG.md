@@ -3,6 +3,20 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.10
+
+The Info line appears when it is asked for, not when the chrome happens to hide.
+
+- The line was deliberately suppressed while the chrome was up, to keep it clear of the bars. That made
+  the Info *button* - a control that lives in the chrome - appear to do nothing for four seconds, which
+  is long enough to press it again and toggle it straight back off. It is shown immediately now, and
+  brought to the front so the bars cannot cover it. The key and the toggle were never broken; the
+  feedback was.
+- Worth recording with the instrument rules: that diagnosis needed an **unfiltered** log with the buffer
+  cleared first. The first attempt found nothing at all - not even the app's own lines - because the
+  platform's `AWindowHandler` audit spam rotates the buffer within seconds, and a narrow filter on top
+  of a rotated buffer answers a question about neither.
+
 ### 1.9
 
 Two faults in the 1.7 profile rows, both reported from use rather than found by reading.
