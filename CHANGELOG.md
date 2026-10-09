@@ -3,6 +3,21 @@
 The apk is attached to each [release](../../releases). The tag, the `versionName` in
 `android/app/AndroidManifest.xml` and this file agree.
 
+### 1.14
+
+Two faults found while putting the seven-channel list onto the TV, both in the app rather than in the setup.
+
+- **A fresh install with no list now opens the settings screen itself.** The first screen said "no
+  channels: fix the list in Settings" and relied on the chrome's Settings button - but the chrome's focus
+  path assumes a channel to focus on, and with no channels there is none, so the safety net could not be
+  reached with a remote. Settings opens outright in that state, and the player starts itself over when it
+  is given a list, which is the other half of the same dead end: `onStart` returned early with no player,
+  so returning from settings used to change nothing.
+- **An import refreshes the profile's summary line.** After importing, the row still read the previous
+  count and source until the panel was reopened, because the import rebuilt the channel rows but not the
+  sentence describing the profile. The same class as the provenance fix before it - the description of a
+  thing was the only thing on screen that was out of date.
+
 ### 1.13
 
 One more trace of the old name, in the artefact rather than the source.
