@@ -173,9 +173,12 @@ So, for anything this project calls verified:
   <tag>` answers that question; reading a ref, or remembering the order things were done in, answers a
   different one. Ask the remote before believing a local ref.
 - **Check that the shipped artifact contains the change**, not only that the release claims it:
-  `aapt dump badging` for the label, `unzip -p <apk> classes.dex | strings` for a string the change
-  introduced, and the apk's own bundled `assets/channels.m3u8` for the playlist. A release that says it
-  has the work and one that can be shown to contain it are different claims.
+  `aapt dump badging` for the label, the apk's own bundled `assets/channels.m3u8` for the playlist, and
+  `unzip -p <apk> classes.dex | strings` for a string the change introduced. That string must be
+  **unique to the change and appear exactly once** in the dex - a representative string appearing three
+  times proves little, because nothing identifies which occurrence is yours. Check the same string is in
+  the tagged tree as well, or the match is a coincidence rather than a comparison. A release that says
+  it has the work and one that can be shown to contain it are different claims.
 - **Ask the source, not the expectation.** What the app does is decided by the app's code: that it
   never reads `group-title`, so that field is for other players, is only knowable by reading it.
 - **Name the instrument that produced the claim.** `aapt dump badging` for the packaged label - the
