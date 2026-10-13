@@ -33,12 +33,12 @@ jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Keyed on build.sh, which is where the toolchain versions are pinned: bump a
       # version there and the cache misses instead of going stale.
       - name: Cache toolchain
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: android/toolchain
           key: iptv-toolchain-${{ hashFiles('android/build.sh') }}
@@ -60,7 +60,7 @@ jobs:
         run: ./android/build.sh
 
       - name: Upload apk
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: iptv-tv-apk
           path: android/app/build/iptv-tv.apk
