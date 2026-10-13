@@ -41,4 +41,4 @@ libVLC instead of relaying anything.
 
 ### License
 
-[CC BY 4.0](LICENSE) — use it, adapt it, credit it.
+[MIT](LICENSE) — use it, adapt it, credit it.
